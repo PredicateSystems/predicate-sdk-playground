@@ -337,7 +337,6 @@ async def main() -> None:
 
         async def step2(step_id: str):
             snap = await runtime.snapshot(limit=40, screenshot=False, goal="Type query: Hacker News Show")
-            # snap = runtime.last_snapshot
             if snap is None:
                 raise RuntimeError("snapshot missing")
 
