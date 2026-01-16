@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "run_id": "4fe1649a-5704-4604-bdde-82ee40742193",
+  "generated_at": "2026-01-16T03:36:44.340907+00:00",
+  "trace_file": {
+    "path": "traces/4fe1649a-5704-4604-bdde-82ee40742193.jsonl",
+    "size_bytes": 11668,
+    "line_count": 21
+  },
+  "summary": {
+    "agent_name": "NewsListSkimmingDemo",
+    "total_steps": 4,
+    "status": "success",
+    "start_time": "2026-01-16T03:36:34.000Z",
+    "end_time": "2026-01-16T03:36:44.000Z",
+    "duration_ms": 10000,
+    "counters": {
+      "snapshot_count": 0,
+      "action_count": 1,
+      "error_count": 0
+    }
+  },
+  "steps": [
+    {
+      "step": 2,
+      "byte_offset": 0,
+      "line_number": 21,
+      "timestamp": "2026-01-16T03:36:34.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": null,
+      "status": "failure"
+    },
+    {
+      "step": 3,
+      "byte_offset": 246,
+      "line_number": 6,
+      "timestamp": "2026-01-16T03:36:37.000Z",
+      "action": {
+        "type": "",
+        "goal": "Navigate to HN Show page + verify list visible",
+        "digest": null
+      },
+      "snapshot": null,
+      "status": "failure"
+    },
+    {
+      "step": 4,
+      "byte_offset": 2662,
+      "line_number": 13,
+      "timestamp": "2026-01-16T03:36:38.000Z",
+      "action": {
+        "type": "",
+        "goal": "LLM identifies top 'Show HN' post",
+        "digest": null
+      },
+      "snapshot": null,
+      "status": "failure"
+    },
+    {
+      "step": 5,
+      "byte_offset": 6164,
+      "line_number": 19,
+      "timestamp": "2026-01-16T03:36:41.000Z",
+      "action": {
+        "type": "",
+        "goal": "Click selected post with human cursor + verify navigation",
+        "digest": "sha256:e93501bf75701f6a1e836a662aeada28ed7c0aa51e66e894465df4f0d931f2e2"
+      },
+      "snapshot": null,
+      "status": "failure"
+    }
+  ]
+}

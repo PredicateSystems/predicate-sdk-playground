@@ -42,3 +42,5 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+.python-version
+.venv/

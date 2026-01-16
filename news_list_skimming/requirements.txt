@@ -1,0 +1,15 @@
+# News List Skimming demo requirements (local-first)
+
+python-dotenv>=1.0.0
+playwright>=1.57.0
+
+# Local text LLM (HF Transformers)
+torch>=2.2.0
+transformers>=4.46.0
+accelerate>=0.30.0
+
+# Vision fallback options
+pillow>=10.0.0
+# Optional (Apple Silicon, quantized vision): install if using MLXVLMProvider
+# mlx-vlm>=0.1.0
+
