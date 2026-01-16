@@ -171,7 +171,7 @@ async def main() -> None:
             tracer=tracer,
             sentience_api_key=sentience_api_key,
             snapshot_options=SnapshotOptions(
-                limit=60,
+                limit=40,
                 screenshot=False,
                 show_overlay=show_overlay,
                 show_grid=show_grid,
@@ -336,8 +336,8 @@ async def main() -> None:
         selected_id: int | None = None  # later, on HN Show page
 
         async def step2(step_id: str):
-            await runtime.snapshot(limit=60, screenshot=False, goal="Type query: Hacker News Show")
-            snap = runtime.last_snapshot
+            snap = await runtime.snapshot(limit=40, screenshot=False, goal="Type query: Hacker News Show")
+            # snap = runtime.last_snapshot
             if snap is None:
                 raise RuntimeError("snapshot missing")
 
@@ -397,7 +397,7 @@ async def main() -> None:
             await browser.page.wait_for_timeout(1000)
 
             # If Google blocks us, fail fast with a clear reason.
-            await runtime.snapshot(limit=60, screenshot=False, goal="Check for bot block or find search results")
+            await runtime.snapshot(limit=40, screenshot=False, goal="Check for bot block or find search results")
             blocked = runtime.assert_(
                 exists("text~'unusual traffic'"),
                 label="google_bot_block_detected",
@@ -418,7 +418,7 @@ async def main() -> None:
 
             # Let LLM pick the "Show | Hacker News" link directly from the compact prompt
             # No strict text matching - let the LLM decide what matches best
-            await runtime.snapshot(limit=60, screenshot=False, goal="Click the result titled 'Show | Hacker News'")
+            await runtime.snapshot(limit=40, screenshot=False, goal="Click the result titled 'Show | Hacker News'")
             snap2 = runtime.last_snapshot
             if snap2 is None:
                 raise RuntimeError("snapshot missing after search results")
@@ -585,7 +585,7 @@ async def main() -> None:
         # Step 3: Verify we landed on HN Show page (Step 2 already clicked the link)
         # -------------------------
         async def step3(step_id: str):
-            await runtime.snapshot(limit=60, screenshot=False, goal=snapshot_goal)
+            await runtime.snapshot(limit=40, screenshot=False, goal=snapshot_goal)
 
             # Debug: print current URL
             current_url = browser.page.url
@@ -601,7 +601,7 @@ async def main() -> None:
         # ---------------------------------------
         async def step4(step_id: str):
             nonlocal selected_id
-            await runtime.snapshot(limit=60, screenshot=False, goal=snapshot_goal)
+            await runtime.snapshot(limit=40, screenshot=False, goal=snapshot_goal)
             snap = runtime.last_snapshot
             if snap is None:
                 raise RuntimeError("snapshot missing")
@@ -700,7 +700,7 @@ async def main() -> None:
             except Exception:
                 await browser.page.wait_for_load_state("domcontentloaded", timeout=10_000)
 
-            await runtime.snapshot(limit=60, screenshot=False, goal=snapshot_goal)
+            await runtime.snapshot(limit=40, screenshot=False, goal=snapshot_goal)
 
             def _url_changed(ctx) -> AssertOutcome:  # type: ignore[no-untyped-def]
                 url = (ctx.url or "").strip()

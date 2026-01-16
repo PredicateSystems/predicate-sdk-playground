@@ -2,6 +2,7 @@
 > python main.py
 
 ### Original Logs
+python main.py
 /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/.venv/lib/python3.11/site-packages/imageio_ffmpeg/_utils.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   from pkg_resources import resource_filename
 [warn] Using sentience from site-packages: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/.venv/lib/python3.11/site-packages/sentience/__init__.py
@@ -10,52 +11,44 @@
          pip install -e ../sdk-python
 
 `torch_dtype` is deprecated! Use `dtype` instead!
-Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████████| 2/2 [00:02<00:00,  1.27s/it]
+Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████| 2/2 [00:02<00:00,  1.21s/it]
 ⚠️  [Sentience] Found 1 un-uploaded trace(s) from previous runs
    Attempting to upload now...
 ☁️  [Sentience] Cloud tracing enabled (Pro tier)
-Screenshots will be saved to: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505
+Screenshots will be saved to: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832
 
-[2026-01-15 21:45:07] Starting Step 1: Navigate to Google + verify search box visible
-  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505/scene1_Navigate_to_Google_+_verify_se.png
-[2026-01-15 21:45:14] Step 1 PASS (7050ms): Navigate to Google + verify search box visible
-[2026-01-15 21:45:14] Step 1 completed with ok=True
+[2026-01-15 21:58:33] Starting Step 1: Navigate to Google + verify search box visible
+  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832/scene1_Navigate_to_Google_+_verify_se.png
+[2026-01-15 21:58:45] Step 1 PASS (11450ms): Navigate to Google + verify search box visible
+[2026-01-15 21:58:45] Step 1 completed with ok=True
 
-[2026-01-15 21:45:14] Starting Step 2: Search Google for 'Hacker News Show' + LLM clicks 'Show | Hacker News' result
+[2026-01-15 21:58:45] Starting Step 2: Search Google for 'Hacker News Show' + LLM clicks 'Show | Hacker News' result
 
 --- Step 2: LLM compact prompt (elements context) ---
-102|combobox|Search|1587|1|2|-|0|
-250|button|I'm Feeling Lucky|813|0|2|-|0|
-249|button|Google Search|808|0|2|-|0|
-67|button|Upload files or images|744|0|2|-|0|
+103|combobox|Search|1587|1|2|-|0|
+251|button|I'm Feeling Lucky|813|0|2|-|0|
+250|button|Google Search|808|0|2|-|0|
+68|button|Upload files or images|744|0|2|-|0|
 18|link|Google apps|706|0|0|-|0|google
-309|button|Settings|520|0|4|-|0|
 310|button|Settings|520|0|4|-|0|
-110|button|Search by voice|357|0|2|-|0|
-113|button|Search by image|352|0|2|-|0|
+311|button|Settings|520|0|4|-|0|
+111|button|Search by voice|357|0|2|-|0|
+114|button|Search by image|352|0|2|-|0|
 23|link|Sign in|316|0|0|-|0|google
-300|link|Applying AI towards science...|230|0|4|-|0|ai
-116|link|AI Mode|172|0|2|-|0|
-298|link|How Search works|163|0|4|-|0|google
-122|button|AI Mode|151|0|2|-|0|
-131|button|AI Mode|143|0|2|-|0|
-123|button|AI Mode|137|0|2|-|0|
-124|button|AI Mode|136|0|2|-|0|
-304|link|Privacy|134|0|4|-|0|google
-297|link|Business|133|0|4|-|0|google
-296|link|Advertising|128|0|4|-|0|google
-305|link|Terms|124|0|4|-|0|google
-7|link|Store|97|0|0|-|0|google
-6|link|About|93|0|0|-|0|about
-68|button||0|0|2|-|0|
-69|button||0|0|2|-|0|
-70|button||0|0|2|-|0|
-111|button||0|0|2|-|0|
-15|link|Search for Images|0|0|0|-|0|google
-13|link|Gmail|0|0|0|-|0|google
-20|link||0|0|0|-|0|google
-21|link||0|0|0|-|0|
-19|link|gb F|0|0|0|-|0|google
+184|link|YouTube Music, row 7 of 7 a...|300|0|6|11|1|youtube
+17|link|Account, row 1 of 5 and col...|300|0|1|0|1|google
+32|link|YouTube, row 2 of 5 and col...|300|0|1|1|1|youtube
+77|link|Translate, row 5 of 5 and c...|300|0|3|4|1|google
+109|link|Slides, row 2 of 7 and colu...|300|0|4|6|1|google
+124|link|Keep, row 3 of 7 and column...|300|0|4|7|1|google
+169|link|Chrome Web Store, row 6 of ...|300|0|6|10|1|google
+47|link|Meet, row 3 of 5 and column...|300|0|2|2|1|google
+62|link|Drive, row 4 of 5 and colum...|300|0|2|3|1|google
+94|link|Finance, row 1 of 7 and col...|300|0|3|5|1|google
+154|link|Travel, row 5 of 7 and colu...|300|0|5|9|1|google
+139|link|Arts and Culture, row 4 of ...|300|0|5|8|1|google
+301|link|Applying AI towards science...|230|0|4|-|0|ai
+117|link|AI Mode|172|0|2|-|0|
 --- end compact prompt ---
 
 The following generation flags are not valid and may be ignored: ['top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
@@ -76,7 +69,7 @@ The following generation flags are not valid and may be ignored: ['top_p', 'top_
 604|link|Hacker News https://news.yc...|407|0|2|4|1|ycombinato
 556|link|Hacker News https://news.yc...|402|0|1|1|1|ycombinato
 696|link|Hacker News https://news.yc...|401|0|3|10|1|ycombinato
-743|link|Reddit · r/SaaS 2 comments ...|392|0|4|13|1|reddit
+743|link|Reddit · r/SaaS 2 comments ...|392|0|4|12|1|reddit
 625|button|About this result|343|0|2|-|0|
 670|button|About this result|334|0|2|-|0|
 577|button|About this result|332|0|1|-|0|
@@ -90,28 +83,10 @@ The following generation flags are not valid and may be ignored: ['top_p', 'top_
 607|link|Hacker News|300|0|2|3|1|ycombinato
 654|link|Hacker News|300|0|2|6|1|ycombinato
 699|link|Hacker News|300|0|3|9|1|ycombinato
-872|link|Hacker News|300|0|6|21|1|ycombinato
-919|link|Hacker News|300|0|6|24|1|ycombinato
-968|link|The Hacker News|300|0|7|27|1|thehackern
-965|link|The Hacker News https://the...|300|0|7|28|1|thehackern
-791|link|Show HN: I made a search en...|300|0|5|16|1|reddit
-779|link|Show HN: A discovery-focuse...|300|0|4|15|1|reddit
-804|link|More results from www.reddi...|300|0|5|17|1|google
-869|link|Hacker News https://news.yc...|300|0|6|22|1|ycombinato
-916|link|Hacker News https://news.yc...|300|0|6|25|1|ycombinato
-748|link|2 comments · 1 month ago|300|0|4|14|1|reddit
-746|link|Reddit · r/SaaS|300|0|4|12|1|reddit
-970|link|https://thehackernews.com|300|0|7|29|1|thehackern
-825|link|Best of Show HN|300|0|5|18|1|bestofshow
-827|link|https://bestofshowhn.com|300|0|5|20|1|bestofshow
-874|link|https://news.ycombinator.co...|300|0|6|23|1|ycombinato
-921|link|https://news.ycombinator.co...|300|0|6|26|1|ycombinato
 656|link|https://news.ycombinator.com|300|0|2|8|1|ycombinato
 561|link|https://news.ycombinator.co...|300|0|1|2|1|ycombinato
 609|link|https://news.ycombinator.co...|300|0|2|5|1|ycombinato
 701|link|https://news.ycombinator.co...|300|0|3|11|1|ycombinato
-822|link|Best of Show HN https://bes.
-… (clipped)
 --- end compact prompt ---
 
 
@@ -127,19 +102,19 @@ Step 2: Agent chose element ID 656 for 'Show | Hacker News'
 
 >>> Clicking element ID 556 (chosen by LLM agent) <<<
 Click result: success=True, outcome=navigated
-  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505/scene2_Search_Google_for_'Hacker_News.png
-[2026-01-15 21:45:38] Step 2 PASS (23642ms): Search Google for 'Hacker News Show' + LLM clicks 'Show | Hacker News' result | search_box_id=102, clicked_result_id=556 (text='Hacker News\nhttps://news.ycombinator.com › show')
-  tokens: prompt=2537 completion=14 total=2551
-[2026-01-15 21:45:38] Step 2 completed with ok=True
+  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832/scene2_Search_Google_for_'Hacker_News.png
+[2026-01-15 21:59:09] Step 2 PASS (24022ms): Search Google for 'Hacker News Show' + LLM clicks 'Show | Hacker News' result | search_box_id=103, clicked_result_id=556 (text='Hacker News\nhttps://news.ycombinator.com › show')
+  tokens: prompt=2024 completion=14 total=2038
+[2026-01-15 21:59:09] Step 2 completed with ok=True
 
-[2026-01-15 21:45:38] Starting Step 3: Verify we landed on HN Show page
+[2026-01-15 21:59:09] Starting Step 3: Verify we landed on HN Show page
 [debug] Step 3: Current URL = https://news.ycombinator.com/show
 [debug] Step 3: URL check (ok1) = True
-  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505/scene3_Verify_we_landed_on_HN_Show_pa.png
-[2026-01-15 21:45:39] Step 3 PASS (1312ms): Verify we landed on HN Show page
-[2026-01-15 21:45:39] Step 3 completed with ok=True
+  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832/scene3_Verify_we_landed_on_HN_Show_pa.png
+[2026-01-15 21:59:10] Step 3 PASS (1349ms): Verify we landed on HN Show page
+[2026-01-15 21:59:10] Step 3 completed with ok=True
 
-[2026-01-15 21:45:39] Starting Step 4: LLM identifies FIRST (top 1) 'Show HN' post
+[2026-01-15 21:59:10] Starting Step 4: LLM identifies FIRST (top 1) 'Show HN' post
 
 --- Step 4: LLM compact prompt (elements context) ---
 49|link|Show HN: Gambit, an open-so...|10300|0|0|0|1|github
@@ -149,8 +124,8 @@ Click result: success=True, outcome=navigated
 121|link|Show HN: TinyCity – A tiny ...|300|0|1|3|1|github
 670|link|Show HN: 1D-Pong Game at 39C3|300|0|5|26|1|github
 598|link|Show HN: OSS AI agent that ...|300|0|4|23|1|trynia
-430|link|Show HN: HyTags – HTML as a...|300|0|3|16|1|hytags
-550|link|Show HN: I spent 10k hours ...|300|0|4|21|1|phrasing
+406|link|Show HN: HyTags – HTML as a...|300|0|3|15|1|hytags
+574|link|Show HN: I spent 10k hours ...|300|0|4|22|1|phrasing
 382|link|Show HN: Tiny FOSS Compass ...|300|0|3|14|1|github
 238|link|Show HN: The Hessian of tal...|300|0|2|8|1|github
 478|link|Show HN: A 10KiB kernel for...|300|0|4|18|1|github
@@ -165,65 +140,51 @@ Click result: success=True, outcome=navigated
 145|link|Show HN: Tabstack – Browser...|300|0|1|4|1|ycombinato
 97|link|Show HN: Reversing YouTube’...|300|0|1|2|1|priyavr
 190|link|Show HN: Sparrow-1 – Audio-...|300|0|1|6|1|tavus
-406|link|Show HN: Ghostty Ambient – ...|300|0|3|15|1|github
+430|link|Show HN: Ghostty Ambient – ...|300|0|3|16|1|github
 454|link|Show HN: Beni AI – Real-tim...|300|0|3|17|1|thebeni
-286|link|Show HN: Webctl – Browser a...|300|0|2|10|1|github
+262|link|Show HN: Webctl – Browser a...|300|0|2|9|1|github
 694|link|Show HN: A fast CLI and MCP...|300|0|5|27|1|github
 166|link|Show HN: Control Claude per...|300|0|1|5|1|github
 502|link|Show HN: GoGen – A simple t...|300|0|4|19|1|github
-574|link|Show HN: Digital Carrot – B...|300|0|4|22|1|digitalcar
-262|link|Show HN: Munimet.ro – ML-ba...|300|0|2|9|1|munimet
-24|link|submit|0|0|0|-|0|ycombinato
-22|link|show|0|0|0|-|0|ycombinato
-20|link|ask|0|0|0|-|0|ycombinato
-27|link|login|0|0|0|-|0|ycombinato
-11|link||0|0|0|-|0|ycombinato
-12|link||0|0|0|-|0|ycombinato
-17|link|new|0|0|0|-|0|ycombinato
-32|link|rules|0|0|0|-|0|ycombinato
-33|link|rules|0|0|0|-|0|ycombinato
-34|link|tips|0|0|0|-|0|ycombinato
-16|link|Hacker News|0|1|0|-|0|ycombinato
-18|link|past|0|0|0|-|0|ycombinato
-19|link|comments|0|0|0|-|0|ycombinato
-23|link|jobs|0|0|0|-|0|ycombinato
+550|link|Show HN: Digital Carrot – B...|300|0|4|21|1|digitalcar
+286|link|Show HN: Munimet.ro – ML-ba...|300|0|2|10|1|munimet
 --- end compact prompt ---
 
   picked: id=49 title='Show HN: Gambit, an open-source agent harness for building reliable AI agents' href='https://github.com/bolt-foundry/gambit'
-  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505/scene4_LLM_identifies_FIRST_(top_1)_'.png
-[2026-01-15 21:45:42] Step 4 PASS (2537ms): LLM identifies FIRST (top 1) 'Show HN' post | picked_title='Show HN: Gambit, an open-source agent harness for building reliable AI agents'
-  tokens: prompt=1542 completion=6 total=1548
-[2026-01-15 21:45:42] Step 4 completed with ok=True
+  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832/scene4_LLM_identifies_FIRST_(top_1)_'.png
+[2026-01-15 21:59:12] Step 4 PASS (2295ms): LLM identifies FIRST (top 1) 'Show HN' post | picked_title='Show HN: Gambit, an open-source agent harness for building reliable AI agents'
+  tokens: prompt=1250 completion=6 total=1256
+[2026-01-15 21:59:12] Step 4 completed with ok=True
 
-[2026-01-15 21:45:42] Starting Step 5: Click selected post with human cursor + verify navigation
-  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505/scene5_Click_selected_post_with_human.png
-[2026-01-15 21:45:46] Step 5 PASS (4182ms): Click selected post with human cursor + verify navigation
-[2026-01-15 21:45:46] Step 5 completed with ok=True
+[2026-01-15 21:59:12] Starting Step 5: Click selected post with human cursor + verify navigation
+  Screenshot saved: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832/scene5_Click_selected_post_with_human.png
+[2026-01-15 21:59:16] Step 5 PASS (3718ms): Click selected post with human cursor + verify navigation
+[2026-01-15 21:59:16] Step 5 completed with ok=True
 ✅ [Sentience] Trace uploaded successfully
 
 === Run Summary ===
-run_id: 3b214966-329a-4a9c-9348-ede413aab501
+run_id: 86b0c757-b099-4e48-8ade-92e5a50b32a1
 success: True
-duration_ms: 47594
-tokens_total: StepTokenUsage(prompt_tokens=4079, completion_tokens=20, total_tokens=4099)
+duration_ms: 52157
+tokens_total: StepTokenUsage(prompt_tokens=3274, completion_tokens=20, total_tokens=3294)
 
 ======================================================================
 Generating video with token overlay...
 ======================================================================
 
-Creating video from screenshots in /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_214505...
+Creating video from screenshots in /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/screenshots/20260115_215832...
 Found 5 screenshots
   Processing scene1_Navigate_to_Google_+_verify_se.png...
   Processing scene2_Search_Google_for_'Hacker_News.png...
-    Adding token overlay (2551 tokens)...
+    Adding token overlay (2038 tokens)...
   Processing scene3_Verify_we_landed_on_HN_Show_pa.png...
   Processing scene4_LLM_identifies_FIRST_(top_1)_'.png...
-    Adding token overlay (1548 tokens)...
+    Adding token overlay (1256 tokens)...
   Processing scene5_Click_selected_post_with_human.png...
   Creating summary screen...
   Concatenating clips...
-  Writing video to /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/video/news_skimming_20260115_214505.mp4...
+  Writing video to /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/video/news_skimming_20260115_215832.mp4...
 
-✅ Video created: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/video/news_skimming_20260115_214505.mp4
+✅ Video created: /Users/sentienceDEV/Code/Sentience/sentience-sdk-playground/news_list_skimming/video/news_skimming_20260115_215832.mp4
    Total duration: 22.0s
    Scenes: 6
