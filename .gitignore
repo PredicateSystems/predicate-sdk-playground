@@ -44,3 +44,6 @@ __pycache__/
 Thumbs.db
 .python-version
 .venv/
+
+# Generated traces (jsonl/index) - demos write these at runtime
+news_list_skimming/traces/

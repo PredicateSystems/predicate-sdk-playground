@@ -11,6 +11,10 @@
 ### 🛒 [Amazon Shopping Demo](amazon_shopping/)
 **Task**: Search for "Christmas gift", select a product, add to cart
 
+**Env vars (.env or export)**:
+- **Required**: `OPENAI_API_KEY` (used by the LLM-based agent demos in this repo)
+- **Optional**: `SENTIENCE_API_KEY` (enables Sentience Gateway refinement + cloud trace upload)
+
 **Results**:
 - **SDK Approach**: ✅ 100% success (optimized: 19,956 tokens)
 - **Vision Approach**: ❌ 0% success (0/3 runs completed)
@@ -19,6 +23,10 @@
 
 ### 🔍 [Google Search Demo](google_search/)
 **Task**: Search for "visiting japan", click a non-ad result
+
+**Env vars (.env or export)**:
+- **Required**: `OPENAI_API_KEY`
+- **Optional**: `SENTIENCE_API_KEY`
 
 **Results**:
 - **SDK Approach**: ✅ 100% success (2,636 tokens with 73% optimization)
@@ -29,14 +37,24 @@
 ### 📰 [News List Skimming Demo](news_list_skimming/)
 **Task**: Open the top “Show HN” post on Hacker News using **local-first** inference.
 
+**Env vars (.env or export)**:
+- **Optional (recommended)**: `SENTIENCE_API_KEY` (forces Gateway snapshots + uploads traces)
+- **Optional**: `LOCAL_TEXT_MODEL` (default: `Qwen/Qwen2.5-3B-Instruct`)
+- **Optional**: `LOCAL_TEXT_DEVICE` (`cpu` is most compatible; `auto` may use accelerate)
+- **Optional (vision fallback)**: `LOCAL_VISION_PROVIDER` (`mlx` or `hf`) + `LOCAL_VISION_MODEL`
+- **Optional**: `HF_TOKEN` (avoids HuggingFace rate limits)
+
 **Highlights**:
 - Tier 1: local text model (Qwen 2.5 3B)
 - Tier 2: optional local vision fallback (Qwen3‑VL) after exhaustion
 - Step-by-step assertions (`AgentRuntime`) + cloud trace upload (`create_tracer`)
 - Human-like cursor click (`CursorPolicy(mode="human")`)
 
-### 🦙 [Local LLama Land (Fake Next.js site)](local-llama-land/)
+### 🦙 [Local LLama Land (Demo Next.js site)](local-llama-land/)
 **Purpose**: A clean, deterministic SPA used for public demos **#3–#5** (login/profile, dashboard KPIs, multi-step form).
+
+**Env vars**:
+- **None required** (demo toggles are via URL query params like `?flaky=1` and `?live=1`)
 
 Highlights:
 - Next.js + Tailwind (professional UI)
