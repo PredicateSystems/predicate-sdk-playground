@@ -151,14 +151,10 @@ def create_demo_video(screenshots_dir: str, token_summary: Dict[str, Any], outpu
             print(f"    Adding token overlay ({scene_tokens} tokens)...")
             img_path = add_token_overlay(img_path, scene_tokens, screenshot_file)
 
-        if is_add_to_cart_scene:
-            # Create panning effect for Add to Cart scene (longer duration)
-            clip = create_ken_burns_clip(img_path, duration=5.0, zoom_direction='in', pan_direction='down')
-        else:
-            # Ken Burns effect for all other scenes (3 seconds)
-            # Alternate zoom direction for variety
-            zoom_dir = 'in' if i % 2 == 0 else 'out'
-            clip = create_ken_burns_clip(img_path, duration=3.0, zoom_direction=zoom_dir, pan_direction='right' if i % 2 == 0 else 'left')
+        # Use simple ImageClip to avoid PIL.ANTIALIAS compatibility issues with newer Pillow
+        # Ken Burns effects are disabled due to MoviePy/Pillow incompatibility
+        duration = 5.0 if is_add_to_cart_scene else 3.0
+        clip = ImageClip(img_path, duration=duration)
 
         clips.append(clip)
 

@@ -10,6 +10,10 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
+# Import shared video utilities from amazon_shopping
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "amazon_shopping", "shared"))
+from video_generator_simple import create_demo_video
+
 from sentience.actions import click_async, press_async, type_text_async
 from sentience.async_api import AsyncSentienceBrowser
 from sentience.backends.playwright_backend import PlaywrightBackend
@@ -48,10 +52,17 @@ def build_llm_user_prompt(task: str, compact_elements: str) -> str:
         "You are controlling a browser via element IDs.\n\n"
         "You must respond with exactly ONE action in this format:\n"
         "- CLICK(<id>)\n\n"
-        "Rules:\n"
-        "- Only click an element that clearly matches the task.\n"
-        "- Prefer DG=1 and low ord for 'top/first' list tasks.\n"
-        "- If multiple candidates match, choose the safest/most obvious.\n\n"
+        "SNAPSHOT FORMAT EXPLANATION:\n"
+        "The snapshot shows elements in this format: ID|role|text|importance|is_primary|docYq|ord|DG|href|\n"
+        "- ID: Element ID (use this for CLICK)\n"
+        "- role: Element type (link, button, etc.)\n"
+        "- text: Visible text content\n"
+        "- importance: Importance score (higher = more important)\n"
+        "- is_primary: 1 if primary action, 0 otherwise\n"
+        "- docYq: Vertical position bucket\n"
+        "- ord: Rank in dominant group (0 = first)\n"
+        "- DG: 1 if in dominant group, 0 otherwise\n"
+        "- href: URL if link element\n\n"
         f"Task:\n{task}\n\n"
         "Elements (ID|role|text|imp|is_primary|docYq|ord|DG|href):\n"
         f"{compact_elements}\n"
@@ -134,6 +145,12 @@ async def main() -> None:
         start_url="https://news.ycombinator.com/show",
     )
     tracer.emit_run_start(agent="NewsListSkimmingDemo", llm_model=local_text_model, config={})
+
+    # Screenshot directory for video recording
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots", timestamp)
+    os.makedirs(screenshots_dir, exist_ok=True)
+    print(f"Screenshots will be saved to: {screenshots_dir}")
 
     # Browser (keep api_key unset to avoid gateway payload limits; tracing upload is separate)
     # NOTE: AsyncSentienceBrowser's async context manager already calls `await start()`.
@@ -233,6 +250,14 @@ async def main() -> None:
                 error = str(e)
                 tracer.emit("error", {"error": error, "step_index": step_index, "goal": goal}, step_id=step_id)
             dt_ms = int((time.time() - t0) * 1000)
+
+            # Take screenshot for video recording
+            screenshot_path = os.path.join(screenshots_dir, f"scene{step_index}_{goal.replace(' ', '_')[:30]}.png")
+            try:
+                await browser.page.screenshot(path=screenshot_path, full_page=False)
+                print(f"  Screenshot saved: {screenshot_path}")
+            except Exception as e:
+                print(f"  Warning: Failed to save screenshot: {e}")
 
             verify = runtime.get_assertions_for_step_end()
             tracer.emit(
@@ -587,7 +612,7 @@ async def main() -> None:
             print(_clip_for_log(compact), flush=True)
             print("--- end compact prompt ---\n", flush=True)
 
-            task = "Find the FIRST (top 1) post in the list that is a 'Show HN' item, then click that post."
+            task = "Find the FIRST (role='link', ord=0, DG=1) post in the list that is a 'Show HN' item, then click that post."
             user_prompt = build_llm_user_prompt(task, compact)
             sys_prompt = "You are a careful web agent. Output only CLICK(<id>)."
 
@@ -746,6 +771,40 @@ async def main() -> None:
         print(f"success: {all_ok}")
         print(f"duration_ms: {run_ms}")
         print(f"tokens_total: {total_tokens}")
+
+        # Generate video from screenshots
+        print("\n" + "=" * 70)
+        print("Generating video with token overlay...")
+        print("=" * 70)
+
+        # Build token_summary in format expected by video_generator_simple
+        token_summary = {
+            "demo_name": "News List Skimming: Local LLM Agent",
+            "total_prompt_tokens": total_tokens.prompt_tokens,
+            "total_completion_tokens": total_tokens.completion_tokens,
+            "total_tokens": total_tokens.total_tokens,
+            "average_per_scene": total_tokens.total_tokens / len(step_stats) if step_stats else 0,
+            "interactions": [
+                {
+                    "scene": f"Scene {s['step_index']}: {s['goal'][:40]}",
+                    "prompt_tokens": s["token_usage"]["prompt_tokens"] if s["token_usage"] else 0,
+                    "completion_tokens": s["token_usage"]["completion_tokens"] if s["token_usage"] else 0,
+                    "total": s["token_usage"]["total_tokens"] if s["token_usage"] else 0,
+                }
+                for s in step_stats
+            ],
+        }
+
+        video_output = os.path.join(os.path.dirname(__file__), "video", f"news_skimming_{timestamp}.mp4")
+        os.makedirs(os.path.dirname(video_output), exist_ok=True)
+
+        try:
+            create_demo_video(screenshots_dir, token_summary, video_output)
+        except Exception as e:
+            print(f"Warning: Video generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            print("Screenshots are still available in the screenshots directory")
 
 
 if __name__ == "__main__":
