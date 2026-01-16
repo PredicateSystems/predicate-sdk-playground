@@ -1,4 +1,4 @@
-# Local LLama Land (Fake Next.js Website)
+# Local Llama Land (Fake Next.js Website)
 
 This is the **fake Next.js SPA** used for public demos **#3–#5** in `docs/public_build_plan.md`.
 

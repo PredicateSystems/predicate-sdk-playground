@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { Navbar } from '../components/navbar';
 
 export const metadata: Metadata = {
-  title: 'Local LLama Land',
+  title: 'Local Llama Land',
   description: 'A clean, deterministic fake social website for Sentience demos.',
 };
 

@@ -7,7 +7,7 @@ export default function HomePage() {
     <div className="space-y-10">
       <section className="space-y-4">
         <div className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/80">
-          Local LLama Land • Demo Site
+          Local Llama Land • Demo Site
         </div>
         <h1 className="text-4xl font-semibold tracking-tight">
           A clean Next.js mock social app built for agent verification demos.

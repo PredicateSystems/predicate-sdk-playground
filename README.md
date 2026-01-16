@@ -50,7 +50,7 @@
 - Step-by-step assertions (`AgentRuntime`) + cloud trace upload (`create_tracer`)
 - Human-like cursor click (`CursorPolicy(mode="human")`)
 
-### 🦙 [Local LLama Land (Demo Next.js site)](local-llama-land/)
+### 🦙 [Local Llama Land (Demo Next.js site)](local-llama-land/)
 **Purpose**: A clean, deterministic SPA used for public demos **#3–#5** (login/profile, dashboard KPIs, multi-step form).
 
 **Env vars**:

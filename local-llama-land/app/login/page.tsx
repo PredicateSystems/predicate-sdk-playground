@@ -39,7 +39,7 @@ export default function LoginPage() {
       <div className="space-y-2">
         <h1 className="text-3xl font-semibold">Sign in</h1>
         <p className="text-white/70">
-          Welcome back to <span className="font-medium text-white">Local LLama Land</span>.
+          Welcome back to <span className="font-medium text-white">Local Llama Land</span>.
         </p>
       </div>
 
