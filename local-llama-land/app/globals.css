@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-white antialiased;
+}
+
+.glass {
+  @apply bg-white/5 border border-white/10 backdrop-blur;
+}
+

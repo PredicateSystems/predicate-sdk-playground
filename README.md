@@ -26,6 +26,23 @@
 
 [📊 Full Comparison Report](google_search/GOOGLE_SEARCH_COMPARISON_REPORT.md)
 
+### 📰 [News List Skimming Demo](news_list_skimming/)
+**Task**: Open the top “Show HN” post on Hacker News using **local-first** inference.
+
+**Highlights**:
+- Tier 1: local text model (Qwen 2.5 3B)
+- Tier 2: optional local vision fallback (Qwen3‑VL) after exhaustion
+- Step-by-step assertions (`AgentRuntime`) + cloud trace upload (`create_tracer`)
+- Human-like cursor click (`CursorPolicy(mode="human")`)
+
+### 🦙 [Local LLama Land (Fake Next.js site)](local-llama-land/)
+**Purpose**: A clean, deterministic SPA used for public demos **#3–#5** (login/profile, dashboard KPIs, multi-step form).
+
+Highlights:
+- Next.js + Tailwind (professional UI)
+- Delayed hydration, late-loading content, iframe
+- Validation-gated state transitions (disabled → enabled)
+
 ---
 
 ## 🚀 Quick Start
