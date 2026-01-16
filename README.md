@@ -41,7 +41,6 @@
 - **Required**: none (Tier 1 is a local HF model)
 - **Optional (recommended)**: `SENTIENCE_API_KEY` (forces Gateway snapshots + uploads traces)
 - **Optional**: `LOCAL_TEXT_MODEL` (default: `Qwen/Qwen2.5-3B-Instruct`)
-- **Optional**: `LOCAL_TEXT_DEVICE` (`cpu` is most compatible; `auto` may use accelerate)
 - **Optional (vision fallback)**: `LOCAL_VISION_PROVIDER` (`mlx` or `hf`) + `LOCAL_VISION_MODEL`
 - **Optional**: `HF_TOKEN` (avoids HuggingFace rate limits)
 

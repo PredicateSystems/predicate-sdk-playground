@@ -2,6 +2,7 @@
 
 python-dotenv>=1.0.0
 playwright>=1.57.0
+playwright-stealth>=1.0.6
 
 # Local text LLM (HF Transformers)
 torch>=2.2.0
