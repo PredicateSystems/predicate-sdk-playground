@@ -42,3 +42,9 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+.python-version
+.venv/
+
+# Generated traces (jsonl/index) - demos write these at runtime
+news_list_skimming/traces/
+news_list_skimming/.user_data/
