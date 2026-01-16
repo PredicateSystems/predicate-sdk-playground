@@ -49,7 +49,7 @@ export default function LoginPage() {
             label="Username"
             name="username"
             autoComplete="username"
-            placeholder="llama_king"
+            placeholder="username"
             value={username}
             onChange={e => setUsername(e.target.value)}
           />
