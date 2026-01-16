@@ -12,7 +12,7 @@
 **Task**: Search for "Christmas gift", select a product, add to cart
 
 **Env vars (.env or export)**:
-- **Required**: `OPENAI_API_KEY` (used by the LLM-based agent demos in this repo)
+- **Required**: `OPENAI_API_KEY` (this demo uses hosted LLM calls)
 - **Optional**: `SENTIENCE_API_KEY` (enables Sentience Gateway refinement + cloud trace upload)
 
 **Results**:
@@ -25,7 +25,7 @@
 **Task**: Search for "visiting japan", click a non-ad result
 
 **Env vars (.env or export)**:
-- **Required**: `OPENAI_API_KEY`
+- **Required**: `OPENAI_API_KEY` (this demo uses hosted LLM calls)
 - **Optional**: `SENTIENCE_API_KEY`
 
 **Results**:
@@ -38,6 +38,7 @@
 **Task**: Open the top “Show HN” post on Hacker News using **local-first** inference.
 
 **Env vars (.env or export)**:
+- **Required**: none (Tier 1 is a local HF model)
 - **Optional (recommended)**: `SENTIENCE_API_KEY` (forces Gateway snapshots + uploads traces)
 - **Optional**: `LOCAL_TEXT_MODEL` (default: `Qwen/Qwen2.5-3B-Instruct`)
 - **Optional**: `LOCAL_TEXT_DEVICE` (`cpu` is most compatible; `auto` may use accelerate)
