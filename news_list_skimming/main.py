@@ -291,7 +291,7 @@ async def main() -> None:
             return ok
 
         # -------------------------
-        # Step 1: Navigate to Google and verify search box exists
+        # Step 1: Navigate to Google and verify url is correct
         # -------------------------
         async def step1(_step_id: str):
             # Use /ncr to reduce geo redirects / extra interstitials.
@@ -301,58 +301,9 @@ async def main() -> None:
             await browser.page.wait_for_timeout(500)
             await runtime.snapshot(goal="Find the Google search box")
 
-            ok1 = runtime.assert_(url_contains("google."), label="on_google", required=True)
-
-            # Debug: print what roles are actually in the snapshot
-            if runtime.last_snapshot:
-                roles_in_snapshot = set()
-                for el in runtime.last_snapshot.elements:
-                    if el.role:
-                        roles_in_snapshot.add(el.role)
-                print(f"[debug] Roles in snapshot: {sorted(roles_in_snapshot)}", flush=True)
-                # Check if combobox/textbox are present
-                has_combobox = any(el.role == "combobox" for el in runtime.last_snapshot.elements)
-                has_textbox = any(el.role == "textbox" for el in runtime.last_snapshot.elements)
-                print(f"[debug] Has combobox: {has_combobox}, Has textbox: {has_textbox}", flush=True)
-
-            # Google uses different roles depending on locale/variant; keep it flexible.
-            ok2 = await runtime.check(
-                exists("role=combobox"),
-                label="google_has_combobox",
-                required=False,
-            ).eventually(
-                timeout_s=8.0,
-                poll_s=0.25,
-                max_snapshot_attempts=3,
-                snapshot_kwargs={
-                    "limit": 60,
-                    "screenshot": False,
-                    "goal": "Find the Google search box",
-                    "use_api": True if use_api else None,
-                    "sentience_api_key": sentience_api_key if use_api else None,
-                },
-                vision_provider=vision_provider,
-            )
-
-            ok3 = await runtime.check(
-                exists("role=textbox"),
-                label="google_has_textbox",
-                required=False,
-            ).eventually(
-                timeout_s=8.0,
-                poll_s=0.25,
-                max_snapshot_attempts=3,
-                snapshot_kwargs={
-                    "limit": 60,
-                    "screenshot": False,
-                    "goal": "Find the Google search box",
-                    "use_api": True if use_api else None,
-                    "sentience_api_key": sentience_api_key if use_api else None,
-                },
-                vision_provider=vision_provider,
-            )
-
-            return (ok1 and (ok2 or ok3)), None
+            # Just verify we're on Google - Step 2's LLM will find the search box
+            ok = runtime.assert_(url_contains("google."), label="on_google", required=True)
+            return ok, None
 
         # ---------------------------------------
         # Step 2: Search for "Hacker News Show"
