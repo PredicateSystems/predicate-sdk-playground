@@ -59,7 +59,7 @@ This tests *ordinal reasoning* ("first", "top") — a known weakness of vision a
 **Result**
 ✅ PASS — zero retries, deterministic
 
-![Demo Screenshot](news_list_skimming/screenshots/20260115_215832/scene4_LLM_identifies_FIRST_\(top_1\)_'.png)
+![Demo Screenshot](news_list_skimming/screenshots/20260115_215832/scene2_Search_Google_for_'Hacker_News.png)
 
 📂 [`news_list_skimming/`](news_list_skimming/) | [📹 Video](news_list_skimming/video/news_skimming_20260115_215832.mp4)
 
@@ -210,8 +210,6 @@ This repo shows that clearly — with real logs, real sites, real results.
 
 **Task**: Complete multi-step form with validation at each step.
 
-![Demo Screenshot](form_validation_submission/screenshots/20260116_164604/scene9_Click_Submit_button.png)
-
-📂 [`form_validation_submission/`](form_validation_submission/) | [📹 Video](form_validation_submission/video/form_validation_20260116_164604.mp4)
+📂 [`form_validation_submission/`](form_validation_submission/) | [📹 Video](form_validation_submission/video/form_validation_20260116_164604.mp4) *(screenshots generated locally after running)*
 
 See [`docs/DEMO_REPORTS.md`](docs/DEMO_REPORTS.md) for detailed execution reports and metrics.
