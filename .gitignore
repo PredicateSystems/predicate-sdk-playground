@@ -50,3 +50,5 @@ news_list_skimming/traces/
 news_list_skimming/.user_data/
 dashboard_kpi_extraction/.user_data/
 login_profile_check/.user_data/
+form_validation_submission/.user_data/
+form_validation_submission/traces/

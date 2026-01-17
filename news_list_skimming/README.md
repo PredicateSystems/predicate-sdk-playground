@@ -1,45 +1,62 @@
-# 📰 News List Skimming Demo (Public Build)
+# Demo 1: News List Skimming
 
-This demo is the “public build” version of the unofficial flow you prototyped in:
-`/Users/guoliangwang/Code/Python/browser-use/examples/integrations/sentience_multi_step_agent.py`
+This demo finds the top story on a dynamic news page (Hacker News Show) using local LLM inference.
 
-It is refactored to be **Sentience-SDK-only** (no `browser-use` dependency) and aligned with
-`docs/public_build_plan.md`:
+## Overview
 
-- **Tier 1 (primary)**: local text LLM (Qwen 2.5 3B) via `LocalLLMProvider`
-- **Tier 2 (fallback)**: local vision LLM (Qwen3-VL) via `MLXVLMProvider` (preferred on Apple Silicon) or `LocalVisionLLMProvider`
-- **Verification-first**: step assertions via `AgentRuntime` + `verification.py` predicates
-- **Cloud trace sink**: `create_tracer(..., upload_trace=True)`
-- **Humanized clicks**: opt-in `CursorPolicy(mode="human")`
-- **Per-step metrics**: timestamps, durations, token usage summary (incl. retries)
+**Task:** Find the top story on a dynamic news page (like Hacker News Show).
 
-## Quickstart
+**Site:** https://news.ycombinator.com/show
 
-### 1) Install deps
+This demo showcases:
+- Structure-first snapshot handles layout
+- Local model parsing text
+- Vision fallback only if the site layout changes radically
+- Good demo for token savings + correctness
+
+## Dependencies
 
 From `sentience-sdk-playground/`:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -r news_list_skimming/requirements.txt
 
-# Install Sentience SDK from this monorepo
-pip install -e ../sdk-python
+# Install Sentience SDK
+pip install sentienceapi
 
+# Install Playwright browsers
 playwright install chromium
 ```
 
-### 2) Env vars
+Required packages (from `news_list_skimming/requirements.txt`):
+- `python-dotenv>=1.0.0`
+- `playwright>=1.57.0`
+- `playwright-stealth>=1.0.6`
+- `torch>=2.2.0` (for local LLM)
+- `transformers>=4.46.0` (for local LLM)
+- `accelerate>=0.30.0` (for local LLM)
+- `pillow>=10.0.0` (for image processing)
+- `mlx-vlm>=0.1.0` (optional, for Apple Silicon vision fallback)
+
+## Environment Variables
+
+Create a `.env` file or export these variables:
 
 ```bash
-export SENTIENCE_API_KEY="sk_..."   # optional but recommended (enables cloud trace upload)
+# Optional but recommended: enables Gateway refinement + cloud trace upload
+# Get your free API key at https://www.sentienceapi.com
+export SENTIENCE_API_KEY="sk_..."
 
-# Local text model (HF Transformers)
+# Local text model (default: Qwen/Qwen2.5-3B-Instruct)
 export LOCAL_TEXT_MODEL="Qwen/Qwen2.5-3B-Instruct"
 
-# Vision fallback: pick ONE
+# Optional: HuggingFace token to avoid rate limits
+export HF_TOKEN="hf_..."
+
+# Vision fallback: pick ONE (optional)
 # (A) MLX-VLM (best for Apple Silicon quantized)
 export LOCAL_VISION_PROVIDER="mlx"
 export LOCAL_VISION_MODEL="mlx-community/Qwen3-VL-8B-Instruct-3bit"
@@ -49,7 +66,7 @@ export LOCAL_VISION_MODEL="mlx-community/Qwen3-VL-8B-Instruct-3bit"
 # export LOCAL_VISION_MODEL="Qwen/Qwen3-VL-8B-Instruct"
 ```
 
-### 3) Run
+## Running the Demo
 
 ```bash
 cd news_list_skimming
@@ -58,8 +75,5 @@ python main.py
 
 ## Notes
 
-- This demo intentionally uses **Hacker News “Show”** because it’s stable and fast, which makes it
-  ideal for public demos.
-- If you want to force vision fallback for a recording, lower `max_snapshot_attempts` and raise
-  `min_confidence` in `main.py`.
-
+- This demo intentionally uses **Hacker News "Show"** because it's stable and fast, which makes it ideal for public demos.
+- If you want to force vision fallback for a recording, lower `max_snapshot_attempts` and raise `min_confidence` in `main.py`.
