@@ -168,6 +168,7 @@ Output JSON with fields:
 - steps: list of steps (id, goal, action, target/intent/input, verify, required, stop_if_true?, optional_substeps?)
 
 Predicates allowed: url_contains, url_matches, exists, not_exists, element_count, any_of, all_of.
+Note: url_contains expects a single string; use any_of for multiple options.
 
 Format example (match keys exactly):
 {{
@@ -409,6 +410,22 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             if action_upper == "TYPE":
                 action_upper = "TYPE_AND_SUBMIT"
             step["action"] = action_upper
+        verify = step.get("verify")
+        if isinstance(verify, list):
+            for v in verify:
+                if not isinstance(v, dict):
+                    continue
+                # Normalize url_contains with multiple args to any_of(url_contains)
+                if v.get("predicate") == "url_contains" and isinstance(v.get("args"), list):
+                    args = v["args"]
+                    if len(args) > 1 and all(isinstance(a, str) for a in args):
+                        v["predicate"] = "any_of"
+                        v["args"] = [{"predicate": "url_contains", "args": [a]} for a in args]
+                if v.get("predicate") == "url_matches" and isinstance(v.get("args"), list):
+                    args = v["args"]
+                    if args and isinstance(args[0], str) and "/dp/" in args[0]:
+                        v["predicate"] = "url_contains"
+                        v["args"] = ["/dp/"]
         target = step.get("target")
         if isinstance(target, str) and "product-url" in target:
             # Replace placeholder product URL with a proper click intent.
@@ -493,7 +510,10 @@ def build_predicate(spec: dict[str, Any]):
     if name == "url_contains":
         return url_contains(args[0])
     if name == "url_matches":
-        return url_matches(args[0])
+        pattern = args[0]
+        if isinstance(pattern, str) and pattern.startswith("/dp/"):
+            return url_contains("/dp/")
+        return url_matches(pattern)
     if name == "exists":
         return exists(args[0])
     if name == "not_exists":
@@ -819,8 +839,21 @@ async def run_executor_step(
         await type_with_stealth(browser.page, text)
         await press_async(browser, "Enter")
         await browser.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        try:
+            await browser.page.wait_for_load_state("networkidle", timeout=8_000)
+        except Exception:
+            pass
         await browser.page.wait_for_timeout(1500)
-        snap = await runtime.snapshot()
+        # Ensure search results exist before snapshot for downstream steps
+        await runtime.check(
+            any_of(
+                element_count("role=link[href*='/dp/']", min_count=3),
+                element_count("role=link[href*='/gp/product/']", min_count=3),
+            ),
+            label="search_results_links_present",
+            required=False,
+        ).eventually(timeout_s=10.0, poll_s=0.5, max_snapshot_attempts=10)
+        snap = await runtime.snapshot(limit=120, screenshot=False, goal="Search results snapshot")
         if snap is not None:
             compact = ctx_formatter._format_snapshot_for_llm(snap)
             print("\n--- Compact prompt (snapshot) ---", flush=True)
@@ -830,7 +863,19 @@ async def run_executor_step(
         return ok, "typed_and_submitted"
 
     if action == "CLICK":
-        snap_limit = 120 if (intent or "").lower() == "search_box" else 60
+        intent_lower = (intent or "").lower()
+        snap_limit = 120 if intent_lower in {"search_box", "first_product_link", "first_search_result"} else 60
+        if intent_lower in {"first_product_link", "first_search_result"}:
+            links_ok = await runtime.check(
+                any_of(
+                    element_count("role=link[href*='/dp/']", min_count=3),
+                    element_count("role=link[href*='/gp/product/']", min_count=3),
+                ),
+                label="product_links_present",
+                required=False,
+            ).eventually(timeout_s=12.0, poll_s=0.5, max_snapshot_attempts=12)
+            if not links_ok:
+                return False, "product_links_not_found"
         snap = await runtime.snapshot(limit=snap_limit, screenshot=False, goal=goal)
         if snap is None:
             return False, "snapshot_missing"
@@ -1047,7 +1092,7 @@ async def main() -> None:
                 sentience_api_key=sentience_api_key if use_api else None,
             ),
         )
-        ctx_formatter = SentienceContext(max_elements=60)
+        ctx_formatter = SentienceContext(max_elements=120)
         cursor_policy = CursorPolicy(mode="human", duration_ms=550, pause_before_click_ms=120, jitter_px=1.5)
 
         all_passed = True
