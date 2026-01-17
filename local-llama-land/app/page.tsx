@@ -13,8 +13,11 @@ export default function HomePage() {
           A clean Next.js mock social app built for agent verification demos.
         </h1>
         <p className="max-w-2xl text-white/70">
-          Designed to showcase Sentience’s strengths: deterministic verification, state-aware assertions,
-          snapshot stability, and optional vision fallback.
+          Welcome to Local Llama Land! This demo site is designed for testing and demonstrating web automation agents.
+          Feel free to explore and test your agents with realistic SPA patterns including delayed hydration, state transitions, and dynamic content.
+          <span className="block mt-2 text-xs text-white/50">
+            Note: Rate limiting is set to 30 requests per minute per IP to ensure fair usage for all testers.
+          </span>
         </p>
         <div className="flex flex-wrap gap-3 pt-2">
           <Link href="/login">
@@ -37,4 +40,3 @@ export default function HomePage() {
     </div>
   );
 }
-

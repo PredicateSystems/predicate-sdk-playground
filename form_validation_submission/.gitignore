@@ -1,0 +1,26 @@
+# User data (browser cache, etc.)
+.user_data/
+
+# Screenshots and videos (generated at runtime)
+screenshots/
+video/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
