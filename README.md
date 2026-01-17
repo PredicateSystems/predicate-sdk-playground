@@ -59,9 +59,9 @@ This tests *ordinal reasoning* ("first", "top") — a known weakness of vision a
 **Result**
 ✅ PASS — zero retries, deterministic
 
-[![Demo Video](news_list_skimming/screenshots/20260115_215832/scene4_LLM_identifies_FIRST_(top_1)_'.png)](news_list_skimming/video/news_skimming_20260115_215832.mp4)
+![Demo Screenshot](news_list_skimming/screenshots/20260115_215832/scene4_LLM_identifies_FIRST_\(top_1\)_'.png)
 
-📂 [`news_list_skimming/`](news_list_skimming/)
+📂 [`news_list_skimming/`](news_list_skimming/) | [📹 Video](news_list_skimming/video/news_skimming_20260115_215832.mp4)
 
 ---
 
@@ -83,9 +83,9 @@ Shows **state-aware assertions** (`enabled`, `visible`, `value_equals`) on a mod
 **Result**
 ✅ PASS — no sleeps, no magic waits
 
-[![Demo Video](login_profile_check/screenshots/20260115_223650/scene4_Click_login_button.png)](login_profile_check/video/login_profile_20260115_223650.mp4)
+![Demo Screenshot](login_profile_check/screenshots/20260115_223650/scene4_Click_login_button.png)
 
-📂 [`login_profile_check/`](login_profile_check/)
+📂 [`login_profile_check/`](login_profile_check/) | [📹 Video](login_profile_check/video/login_profile_20260115_223650.mp4)
 
 ---
 
@@ -107,9 +107,9 @@ High-noise, JS-heavy, real production site.
 **Result**
 ✅ PASS — vision-only agents failed 3/3 runs
 
-[![Demo Video](amazon_shopping_with_assertions/screenshots/20260116_182430/scene4_Pick_first_product_from_search.png)](amazon_shopping_with_assertions/video/amazon_shopping_20260116_182430.mp4)
+![Demo Screenshot](amazon_shopping_with_assertions/screenshots/20260116_182430/scene4_Pick_first_product_from_search.png)
 
-📂 [`amazon_shopping_with_assertions/`](amazon_shopping_with_assertions/)
+📂 [`amazon_shopping_with_assertions/`](amazon_shopping_with_assertions/) | [📹 Video](amazon_shopping_with_assertions/video/amazon_shopping_20260116_182430.mp4)
 
 ---
 
@@ -202,16 +202,16 @@ This repo shows that clearly — with real logs, real sites, real results.
 
 **Task**: Extract KPIs from dynamic dashboard with DOM churn resilience.
 
-[![Demo Video](dashboard_kpi_extraction/screenshots/20260115_230444/scene7_Extract_KPI_values.png)](dashboard_kpi_extraction/video/dashboard_kpi_20260115_230444.mp4)
+![Demo Screenshot](dashboard_kpi_extraction/screenshots/20260115_230444/scene7_Extract_KPI_values.png)
 
-📂 [`dashboard_kpi_extraction/`](dashboard_kpi_extraction/)
+📂 [`dashboard_kpi_extraction/`](dashboard_kpi_extraction/) | [📹 Video](dashboard_kpi_extraction/video/dashboard_kpi_20260115_230444.mp4)
 
 ### Form Validation + Submission
 
 **Task**: Complete multi-step form with validation at each step.
 
-[![Demo Video](form_validation_submission/screenshots/20260116_164604/scene9_Click_Submit_button.png)](form_validation_submission/video/form_validation_20260116_164604.mp4)
+![Demo Screenshot](form_validation_submission/screenshots/20260116_164604/scene9_Click_Submit_button.png)
 
-📂 [`form_validation_submission/`](form_validation_submission/)
+📂 [`form_validation_submission/`](form_validation_submission/) | [📹 Video](form_validation_submission/video/form_validation_20260116_164604.mp4)
 
 See [`docs/DEMO_REPORTS.md`](docs/DEMO_REPORTS.md) for detailed execution reports and metrics.
