@@ -924,6 +924,23 @@ async def run_executor_step(
 
         text = step.get("input", SEARCH_QUERY)
         await type_with_stealth(browser.page, text)
+        # Fallback: if the input value didn't stick, set it via JS and retype.
+        try:
+            current_value = await browser.page.evaluate(
+                "(() => { const el = document.activeElement; return el && el.value ? el.value : ''; })()"
+            )
+        except Exception:
+            current_value = ""
+        if not current_value or text.lower() not in str(current_value).lower():
+            try:
+                await browser.page.evaluate(
+                    "(q) => { const el = document.activeElement; if (el) { el.value = q; el.dispatchEvent(new Event('input', { bubbles: true })); } }",
+                    text,
+                )
+                await browser.page.wait_for_timeout(300)
+            except Exception:
+                pass
+            await type_with_stealth(browser.page, text)
         await press_async(browser, "Enter")
         await browser.page.wait_for_load_state("domcontentloaded", timeout=15_000)
         try:
@@ -1327,6 +1344,8 @@ async def main() -> None:
                         new_plan, raw_replan_output = extract_replan_with_retry(
                             planner, task, feedback, max_attempts=2
                         )
+                        if "search_results_not_verified" in feedback:
+                            new_plan = ensure_minimum_plan(new_plan, SEARCH_QUERY)
                         steps = new_plan.get("steps", [])
                         if not steps:
                             raise RuntimeError("Replan returned no steps")
