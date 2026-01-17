@@ -54,3 +54,6 @@ form_validation_submission/.user_data/
 form_validation_submission/traces/
 amazon_shopping_with_assertions/.user_data/
 amazon_shopping_with_assertions/traces/
+planner_executor_local/.user_data/
+planner_executor_local/planner_feedback/
+planner_executor_local/executor.log
