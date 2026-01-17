@@ -37,6 +37,7 @@ from sentience.tracer_factory import create_tracer
 from sentience.verification import (
     all_of,
     any_of,
+    custom,
     element_count,
     exists,
     not_exists,
@@ -96,7 +97,13 @@ class LocalHFModel:
             torch_dtype=torch_dtype,
         )
 
-    def generate(self, system: str, user: str, max_new_tokens: int = 256, temperature: float = 0.0) -> LlmResult:
+    def generate(
+        self,
+        system: str,
+        user: str,
+        max_new_tokens: int = 256,
+        temperature: float = 0.0,
+    ) -> LlmResult:
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -157,7 +164,11 @@ def build_planner_prompt(task: str, strict: bool = False) -> tuple[str, str]:
         "include an optional substep to detect and click it.\n"
         "Do NOT hardcode product URLs like /dp/product-url; use a CLICK step on the first product link."
     )
-    strict_note = "\nReturn ONLY a JSON object. Do not include any other text.\n" if strict else ""
+    strict_note = (
+        "\nReturn ONLY a JSON object. Do not include any other text.\n"
+        if strict
+        else ""
+    )
     user = f"""
 Task: {task}
 {strict_note}
@@ -264,7 +275,9 @@ def extract_plan_with_retry(
     for attempt in range(1, max_attempts + 1):
         max_tokens = 1024 if attempt == 1 else 1536
         sys_prompt, user_prompt = build_planner_prompt(task, strict=(attempt > 1))
-        resp = planner.generate(sys_prompt, user_prompt, temperature=0.0, max_new_tokens=max_tokens)
+        resp = planner.generate(
+            sys_prompt, user_prompt, temperature=0.0, max_new_tokens=max_tokens
+        )
         last_output = resp.content
         try:
             plan = extract_json(resp.content)
@@ -272,7 +285,9 @@ def extract_plan_with_retry(
             return plan, last_output
         except Exception:
             continue
-    raise RuntimeError(f"Planner failed to return JSON after {max_attempts} attempts.\nRaw output:\n{last_output}")
+    raise RuntimeError(
+        f"Planner failed to return JSON after {max_attempts} attempts.\nRaw output:\n{last_output}"
+    )
 
 
 def build_replan_prompt(
@@ -290,8 +305,16 @@ def build_replan_prompt(
         "Step ids in a replan MUST start at 1 and be contiguous.\n"
         "Do NOT hardcode product URLs like /dp/product-url; use CLICK on a product link."
     )
-    strict_note = "\nReturn ONLY a JSON object. Do not include any other text.\n" if strict else ""
-    schema_note = f"\nSchema errors from last attempt:\n{schema_errors}\n" if schema_errors else ""
+    strict_note = (
+        "\nReturn ONLY a JSON object. Do not include any other text.\n"
+        if strict
+        else ""
+    )
+    schema_note = (
+        f"\nSchema errors from last attempt:\n{schema_errors}\n"
+        if schema_errors
+        else ""
+    )
     user = f"""
 Task: {task}
 {strict_note}
@@ -342,7 +365,9 @@ def extract_replan_with_retry(
         sys_prompt, user_prompt = build_replan_prompt(
             task, feedback, strict=(attempt > 1), schema_errors=last_errors or None
         )
-        resp = planner.generate(sys_prompt, user_prompt, temperature=0.0, max_new_tokens=max_tokens)
+        resp = planner.generate(
+            sys_prompt, user_prompt, temperature=0.0, max_new_tokens=max_tokens
+        )
         last_output = resp.content
         try:
             plan = extract_json(resp.content)
@@ -364,7 +389,9 @@ def extract_replan_with_retry(
     )
 
 
-def build_executor_prompt(goal: str, intent: str | None, compact: str) -> tuple[str, str]:
+def build_executor_prompt(
+    goal: str, intent: str | None, compact: str
+) -> tuple[str, str]:
     intent_line = f"Intent: {intent}\n" if intent else ""
     system = "You are a careful web agent. Output only CLICK(<id>)."
     intent_lower = (intent or "").lower()
@@ -416,12 +443,18 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(v, dict):
                     continue
                 # Normalize url_contains with multiple args to any_of(url_contains)
-                if v.get("predicate") == "url_contains" and isinstance(v.get("args"), list):
+                if v.get("predicate") == "url_contains" and isinstance(
+                    v.get("args"), list
+                ):
                     args = v["args"]
                     if len(args) > 1 and all(isinstance(a, str) for a in args):
                         v["predicate"] = "any_of"
-                        v["args"] = [{"predicate": "url_contains", "args": [a]} for a in args]
-                if v.get("predicate") == "url_matches" and isinstance(v.get("args"), list):
+                        v["args"] = [
+                            {"predicate": "url_contains", "args": [a]} for a in args
+                        ]
+                if v.get("predicate") == "url_matches" and isinstance(
+                    v.get("args"), list
+                ):
                     args = v["args"]
                     if args and isinstance(args[0], str) and "/dp/" in args[0]:
                         v["predicate"] = "url_contains"
@@ -432,9 +465,24 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             step.pop("target", None)
             step["action"] = "CLICK"
             step["intent"] = step.get("intent") or "first_product_link"
-            step["goal"] = step.get("goal") or "Click the FIRST product link in search results"
+            step["goal"] = (
+                step.get("goal") or "Click the FIRST product link in search results"
+            )
             step["verify"] = [{"predicate": "url_contains", "args": ["/dp/"]}]
     return plan
+
+
+def is_search_results_url(url: str, query: str) -> bool:
+    current = (url or "").lower()
+    keyword_in_url = f"k={query.lower()}" in current
+    search_url_pattern = ("/s" in current) or ("s?k=" in current) or ("/s/" in current)
+    not_product_page = "/dp/" not in current and "/gp/product/" not in current
+    not_homepage = not (
+        current.endswith("amazon.com/")
+        or current.endswith("amazon.com")
+        or current.rstrip("/").endswith("amazon.com")
+    )
+    return (keyword_in_url or search_url_pattern) and not_product_page and not_homepage
 
 
 def format_verify_specs(verify: list[dict[str, Any]]) -> str:
@@ -475,7 +523,9 @@ async def vision_fallback_check(
         f"Reason: {reason}\n"
         "Answer only YES or NO."
     )
-    resp = vision_llm.generate_with_image(system, user, image_b64, max_new_tokens=16, temperature=0.0)
+    resp = vision_llm.generate_with_image(
+        system, user, image_b64, max_new_tokens=16, temperature=0.0
+    )
     return is_yes(resp.content or ""), (resp.content or "").strip()
 
 
@@ -499,7 +549,9 @@ async def vision_select_click_id(
         f"{compact}\n\n"
         "Return ONLY: CLICK(<id>)"
     )
-    resp = vision_llm.generate_with_image(system, user, image_b64, max_new_tokens=24, temperature=0.0)
+    resp = vision_llm.generate_with_image(
+        system, user, image_b64, max_new_tokens=24, temperature=0.0
+    )
     click_id = parse_click_id(resp.content or "")
     return click_id, (resp.content or "").strip()
 
@@ -511,7 +563,11 @@ def build_predicate(spec: dict[str, Any]):
         return url_contains(args[0])
     if name == "url_matches":
         pattern = args[0]
-        if isinstance(pattern, str) and pattern.startswith("/dp/"):
+        if (
+            isinstance(pattern, str)
+            and "/dp/" in pattern
+            and not pattern.startswith("http")
+        ):
             return url_contains("/dp/")
         return url_matches(pattern)
     if name == "exists":
@@ -530,7 +586,9 @@ def build_predicate(spec: dict[str, Any]):
     raise ValueError(f"Unsupported predicate: {name}")
 
 
-async def apply_verifications(runtime: AgentRuntime, verify: list[dict[str, Any]], required: bool) -> bool:
+async def apply_verifications(
+    runtime: AgentRuntime, verify: list[dict[str, Any]], required: bool
+) -> bool:
     if not verify:
         return True
     ok_all = True
@@ -566,7 +624,9 @@ def _validate_predicate_spec(spec: dict[str, Any], path: str) -> list[str]:
             errors.append(f"{path}: '{predicate}' expects args: [string]")
     elif predicate == "element_count":
         if not (isinstance(args, list) and len(args) >= 1 and isinstance(args[0], str)):
-            errors.append(f"{path}: 'element_count' expects args: [selector, min?, max?]")
+            errors.append(
+                f"{path}: 'element_count' expects args: [selector, min?, max?]"
+            )
     elif predicate in {"any_of", "all_of"}:
         if not isinstance(args, list) or not args:
             errors.append(f"{path}: '{predicate}' expects args: [predicate_spec, ...]")
@@ -620,7 +680,9 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
         else:
             step_id = step["id"]
             if step_id != expected_id:
-                errors.append(f"{path}.id must be contiguous starting at 1 (expected={expected_id})")
+                errors.append(
+                    f"{path}.id must be contiguous starting at 1 (expected={expected_id})"
+                )
             last_id = step_id
             expected_id += 1
         if not isinstance(step.get("goal"), str):
@@ -657,7 +719,9 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
                         continue
                     extra = set(sub.keys()) - allowed_step_keys
                     if extra:
-                        errors.append(f"{sub_path} has unsupported keys: {sorted(extra)}")
+                        errors.append(
+                            f"{sub_path} has unsupported keys: {sorted(extra)}"
+                        )
                     if "id" in sub:
                         if not isinstance(sub.get("id"), int):
                             errors.append(f"{sub_path}.id must be int when provided")
@@ -674,25 +738,35 @@ def validate_plan(plan: dict[str, Any]) -> list[str]:
                                     f"{sub_path}.id must be contiguous (expected={sub_expected_id})"
                                 )
                             if last_sub_id is not None and sub_id <= last_sub_id:
-                                errors.append(f"{sub_path}.id must be strictly increasing (prev={last_sub_id})")
+                                errors.append(
+                                    f"{sub_path}.id must be strictly increasing (prev={last_sub_id})"
+                                )
                             last_sub_id = sub_id
                             sub_expected_id += 1
                     elif last_sub_id is not None:
-                        errors.append(f"{sub_path}.id required once any optional_substeps have ids")
+                        errors.append(
+                            f"{sub_path}.id required once any optional_substeps have ids"
+                        )
                     if not isinstance(sub.get("goal"), str):
                         errors.append(f"{sub_path}.goal must be string")
                     sub_action = sub.get("action")
                     if not isinstance(sub_action, str):
                         errors.append(f"{sub_path}.action must be string")
                     elif sub_action.upper() not in allowed_actions:
-                        errors.append(f"{sub_path}.action must be one of {sorted(allowed_actions)}")
+                        errors.append(
+                            f"{sub_path}.action must be one of {sorted(allowed_actions)}"
+                        )
                     if "verify" in sub:
                         verify = sub.get("verify")
                         if not isinstance(verify, list):
                             errors.append(f"{sub_path}.verify must be a list")
                         else:
                             for j, v in enumerate(verify):
-                                errors.extend(_validate_predicate_spec(v, f"{sub_path}.verify[{j}]"))
+                                errors.extend(
+                                    _validate_predicate_spec(
+                                        v, f"{sub_path}.verify[{j}]"
+                                    )
+                                )
     return errors
 
 
@@ -744,7 +818,12 @@ def ensure_minimum_plan(plan: dict[str, Any], query: str) -> dict[str, Any]:
                     "goal": "If 'Add to Your Order' drawer appears, click 'No thanks'",
                     "action": "CLICK",
                     "intent": "drawer_no_thanks",
-                    "verify": [{"predicate": "not_exists", "args": ["text~'Add to Your Order'"]}],
+                    "verify": [
+                        {
+                            "predicate": "not_exists",
+                            "args": ["text~'Add to Your Order'"],
+                        }
+                    ],
                     "required": False,
                 }
             ],
@@ -821,18 +900,26 @@ async def run_executor_step(
 
     if action == "TYPE_AND_SUBMIT":
         # Ensure search box is focused before typing
-        pre_snap = await runtime.snapshot(limit=60, screenshot=False, goal="Focus search box before typing")
+        pre_snap = await runtime.snapshot(
+            limit=60, screenshot=False, goal="Focus search box before typing"
+        )
         if pre_snap is not None:
             pre_compact = ctx_formatter._format_snapshot_for_llm(pre_snap)
             print("\n--- Compact prompt (pre-type snapshot) ---", flush=True)
             print(pre_compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
             focus_goal = "Click the search input box (role=searchbox or role=textbox) before typing."
-            sys_prompt, user_prompt = build_executor_prompt(focus_goal, "search_box", pre_compact)
-            focus_resp = executor.generate(sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24)
+            sys_prompt, user_prompt = build_executor_prompt(
+                focus_goal, "search_box", pre_compact
+            )
+            focus_resp = executor.generate(
+                sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
+            )
             focus_id = parse_click_id(focus_resp.content)
             if focus_id is not None:
-                await click_async(browser, focus_id, use_mouse=True, cursor_policy=cursor_policy)
+                await click_async(
+                    browser, focus_id, use_mouse=True, cursor_policy=cursor_policy
+                )
                 await browser.page.wait_for_timeout(400)
 
         text = step.get("input", SEARCH_QUERY)
@@ -844,6 +931,11 @@ async def run_executor_step(
         except Exception:
             pass
         await browser.page.wait_for_timeout(1500)
+        current_url = browser.page.url
+        if not is_search_results_url(current_url, SEARCH_QUERY):
+            print(f"  [error] Could not verify search results page", flush=True)
+            print(f"  [error] Current URL: {current_url}", flush=True)
+            return False, "search_results_not_verified"
         # Ensure search results exist before snapshot for downstream steps
         await runtime.check(
             any_of(
@@ -853,7 +945,9 @@ async def run_executor_step(
             label="search_results_links_present",
             required=False,
         ).eventually(timeout_s=10.0, poll_s=0.5, max_snapshot_attempts=10)
-        snap = await runtime.snapshot(limit=120, screenshot=False, goal="Search results snapshot")
+        snap = await runtime.snapshot(
+            limit=120, screenshot=False, goal="Search results snapshot"
+        )
         if snap is not None:
             compact = ctx_formatter._format_snapshot_for_llm(snap)
             print("\n--- Compact prompt (snapshot) ---", flush=True)
@@ -864,18 +958,32 @@ async def run_executor_step(
 
     if action == "CLICK":
         intent_lower = (intent or "").lower()
-        snap_limit = 120 if intent_lower in {"search_box", "first_product_link", "first_search_result"} else 60
+        snap_limit = (
+            120
+            if intent_lower
+            in {"search_box", "first_product_link", "first_search_result"}
+            else 60
+        )
         if intent_lower in {"first_product_link", "first_search_result"}:
+
+            def _has_product_links(ctx) -> bool:
+                snap = ctx.snapshot
+                if not snap:
+                    return False
+                return any(
+                    (el.href or "").find("/dp/") >= 0
+                    or (el.href or "").find("/gp/product/") >= 0
+                    for el in snap.elements
+                )
+
             links_ok = await runtime.check(
-                any_of(
-                    element_count("role=link[href*='/dp/']", min_count=3),
-                    element_count("role=link[href*='/gp/product/']", min_count=3),
-                ),
+                custom(_has_product_links, label="product_links_present"),
                 label="product_links_present",
-                required=False,
+                required=True,
             ).eventually(timeout_s=12.0, poll_s=0.5, max_snapshot_attempts=12)
             if not links_ok:
                 return False, "product_links_not_found"
+            snap_limit = 160
         snap = await runtime.snapshot(limit=snap_limit, screenshot=False, goal=goal)
         if snap is None:
             return False, "snapshot_missing"
@@ -884,10 +992,14 @@ async def run_executor_step(
         print(compact, flush=True)
         print("--- end compact prompt ---\n", flush=True)
         sys_prompt, user_prompt = build_executor_prompt(goal, intent, compact)
-        resp = executor.generate(sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24)
+        resp = executor.generate(
+            sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
+        )
         click_id = parse_click_id(resp.content)
         if click_id is None:
-            runtime.assert_(exists("role=button"), label="llm_failed_to_pick_click", required=True)
+            runtime.assert_(
+                exists("role=button"), label="llm_failed_to_pick_click", required=True
+            )
             vision_id, vision_text = await vision_select_click_id(
                 vision_llm=vision_llm,
                 browser=browser,
@@ -910,7 +1022,9 @@ async def run_executor_step(
                 click_id = vision_id
             else:
                 return False, "llm_click_id_missing"
-        await click_async(browser, click_id, use_mouse=True, cursor_policy=cursor_policy)
+        await click_async(
+            browser, click_id, use_mouse=True, cursor_policy=cursor_policy
+        )
         await browser.page.wait_for_timeout(1200)
         snap_after = await runtime.snapshot()
         compact_after = None
@@ -953,7 +1067,9 @@ async def run_executor_step(
                         "selected_id": vision_id,
                     },
                 )
-                await click_async(browser, vision_id, use_mouse=True, cursor_policy=cursor_policy)
+                await click_async(
+                    browser, vision_id, use_mouse=True, cursor_policy=cursor_policy
+                )
                 await browser.page.wait_for_timeout(1200)
                 await runtime.snapshot()
                 ok = await apply_verifications(runtime, verify, required)
@@ -992,7 +1108,15 @@ async def maybe_run_optional_substeps(
         return
     for sub in optional:
         await run_executor_step(
-            sub, runtime, browser, executor, ctx_formatter, cursor_policy, vision_llm, feedback_path, run_id
+            sub,
+            runtime,
+            browser,
+            executor,
+            ctx_formatter,
+            cursor_policy,
+            vision_llm,
+            feedback_path,
+            run_id,
         )
 
 
@@ -1004,8 +1128,12 @@ async def main() -> None:
     device_map = get_device_map()
     torch_dtype = get_torch_dtype()
 
-    planner = LocalHFModel(planner_model, device_map=device_map, torch_dtype=torch_dtype)
-    executor = LocalHFModel(executor_model, device_map=device_map, torch_dtype=torch_dtype)
+    planner = LocalHFModel(
+        planner_model, device_map=device_map, torch_dtype=torch_dtype
+    )
+    executor = LocalHFModel(
+        executor_model, device_map=device_map, torch_dtype=torch_dtype
+    )
 
     vision_llm = None
     if os.getenv("ENABLE_VISION_FALLBACK", "0") == "1":
@@ -1014,7 +1142,9 @@ async def main() -> None:
         if vision_provider == "mlx":
             vision_llm = MLXVLMProvider(model=vision_model)
         else:
-            vision_llm = LocalVisionLLMProvider(model_name=vision_model, device="auto", torch_dtype="auto")
+            vision_llm = LocalVisionLLMProvider(
+                model_name=vision_model, device="auto", torch_dtype="auto"
+            )
 
     sentience_api_key = os.getenv("SENTIENCE_API_KEY")
     use_api = bool((sentience_api_key or "").strip())
@@ -1043,7 +1173,9 @@ async def main() -> None:
         llm_model=f"{planner_model} -> {executor_model}",
         start_url=DEFAULT_PLAN_URL,
     )
-    tracer.emit_run_start(agent="PlannerExecutorDemo", llm_model=planner_model, config={})
+    tracer.emit_run_start(
+        agent="PlannerExecutorDemo", llm_model=planner_model, config={}
+    )
     builtins.print = log_print
     log_print(f"\n=== Executor Log Start: {run_id} @ {now_iso()} ===", flush=True)
 
@@ -1054,7 +1186,9 @@ async def main() -> None:
         raise RuntimeError(f"Failed to parse planner JSON: {exc}")
     errors = validate_plan(plan)
     if errors:
-        raise RuntimeError("Planner output failed schema validation:\n- " + "\n- ".join(errors))
+        raise RuntimeError(
+            "Planner output failed schema validation:\n- " + "\n- ".join(errors)
+        )
 
     steps = plan.get("steps", [])
     if not steps:
@@ -1074,7 +1208,9 @@ async def main() -> None:
         },
     )
 
-    async with AsyncSentienceBrowser(headless=False, user_data_dir=".user_data") as browser:
+    async with AsyncSentienceBrowser(
+        headless=False, user_data_dir=".user_data"
+    ) as browser:
         if browser.page is None:
             raise RuntimeError("Browser page not initialized")
 
@@ -1093,7 +1229,9 @@ async def main() -> None:
             ),
         )
         ctx_formatter = SentienceContext(max_elements=120)
-        cursor_policy = CursorPolicy(mode="human", duration_ms=550, pause_before_click_ms=120, jitter_px=1.5)
+        cursor_policy = CursorPolicy(
+            mode="human", duration_ms=550, pause_before_click_ms=120, jitter_px=1.5
+        )
 
         all_passed = True
         max_replans = int(os.getenv("MAX_REPLANS", "1"))
@@ -1113,7 +1251,10 @@ async def main() -> None:
             step = steps[step_index]
             step_start_ts = time.time()
             step_start_iso = now_iso()
-            print(f"[{step_start_iso}] Step {step.get('id')}: {step.get('goal')}", flush=True)
+            print(
+                f"[{step_start_iso}] Step {step.get('id')}: {step.get('goal')}",
+                flush=True,
+            )
             print("  Planner step decision:", flush=True)
             print(json.dumps(step, indent=2), flush=True)
             ok, note = await run_executor_step(
@@ -1209,7 +1350,10 @@ async def main() -> None:
                     all_passed = False
                     break
             if step.get("stop_if_true") and ok:
-                runtime.assert_done(any_of(url_contains("signin"), url_contains("/ap/")), label="checkout_complete")
+                runtime.assert_done(
+                    any_of(url_contains("signin"), url_contains("/ap/")),
+                    label="checkout_complete",
+                )
                 break
             step_index += 1
 
@@ -1224,14 +1368,18 @@ async def main() -> None:
             "steps_passed": steps_passed,
             "steps_failed": steps_failed,
             "total_duration_s": round(sum(durations), 3),
-            "avg_step_duration_s": round(sum(durations) / len(durations), 3) if durations else 0,
+            "avg_step_duration_s": (
+                round(sum(durations) / len(durations), 3) if durations else 0
+            ),
             "replans_used": summary["replans_used"],
         }
         feedback_dir.mkdir(parents=True, exist_ok=True)
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
         tracer.set_final_status("success" if all_passed else "failure")
-        tracer.emit_run_end(steps=len(steps), status=("success" if all_passed else "failure"))
+        tracer.emit_run_end(
+            steps=len(steps), status=("success" if all_passed else "failure")
+        )
         tracer.close(blocking=True)
 
 
