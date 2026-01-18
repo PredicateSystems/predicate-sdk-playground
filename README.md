@@ -140,6 +140,16 @@ Snapshots provide:
 
 Assertions verify outcomes — not guesses.
 
+## Why Compact Prompts + Local LLMs Work Well
+
+The demo suite consistently succeeds with a small local model (Qwen2.5 3B) using compact, structured prompts:
+
+- **Token efficiency**: ~14.9K tokens across 5 demos vs 100K+ for vision-heavy approaches
+- **Reliability**: 5/5 PASS with 0 retries across multi-step flows
+- **Speed**: Local text models are faster than vision LLMs for structured UI tasks
+
+See `docs/DEMO_REPORTS.md` for full metrics and results.
+
 ---
 
 ## 🚀 Quick Start
