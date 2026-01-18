@@ -4,6 +4,16 @@ Planner + Executor scaffold for Amazon shopping (local models).
 
 Planner: Qwen 2.5 7B produces a JSON plan.
 Executor: Qwen 2.5 3B executes each step with AgentRuntime assertions.
+
+M4 Optimizations:
+- Auto device mapping for optimal layer distribution across unified memory
+- BFloat16 dtype (optimized for Apple Neural Engine)
+- SDPA attention implementation (faster than eager on MPS)
+- Low CPU memory usage mode for better memory management
+
+Environment overrides (optional):
+- DEVICE_MAP: Set to "mps" or "cpu" to override auto-detection
+- TORCH_DTYPE: Set to "bf16", "fp16" to override dtype
 """
 from __future__ import annotations
 
@@ -72,8 +82,10 @@ def get_device_map() -> str:
     override = os.getenv("DEVICE_MAP")
     if override:
         return override
+    # Use "auto" for better layer distribution on MPS (Apple Silicon)
+    # This allows transformers to automatically distribute layers across unified memory
     if torch.backends.mps.is_available():
-        return "mps"
+        return "auto"
     return "auto"
 
 
@@ -84,6 +96,10 @@ def get_torch_dtype() -> torch.dtype:
             return torch.bfloat16
         if override.lower() == "fp16":
             return torch.float16
+    # Use bfloat16 on MPS (Apple Silicon M1/M2/M3/M4) for better performance
+    # bfloat16 is optimized for Apple Neural Engine and has better numerical stability
+    if torch.backends.mps.is_available():
+        return torch.bfloat16
     return torch.float16
 
 
@@ -91,10 +107,25 @@ class LocalHFModel:
     def __init__(self, model_name: str, device_map: str, torch_dtype: torch.dtype):
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+
+        # Build model loading kwargs with MPS-specific optimizations
+        load_kwargs = {
+            "device_map": device_map,
+            "torch_dtype": torch_dtype,
+            "low_cpu_mem_usage": True,  # Better memory management for large models
+        }
+
+        # MPS-specific optimizations for Apple Silicon (M1/M2/M3/M4)
+        if torch.backends.mps.is_available():
+            # MPS doesn't support flash attention - use eager or sdpa
+            # eager is more stable on MPS but sdpa is faster if available
+            load_kwargs["attn_implementation"] = "sdpa"  # Scaled Dot Product Attention
+            # Note: If you encounter errors, fallback to "eager"
+            # load_kwargs["attn_implementation"] = "eager"
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            device_map=device_map,
-            torch_dtype=torch_dtype,
+            **load_kwargs
         )
 
     def generate(
