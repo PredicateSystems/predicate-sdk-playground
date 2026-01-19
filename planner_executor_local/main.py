@@ -1145,7 +1145,7 @@ def ensure_minimum_plan(plan: dict[str, Any], query: str) -> dict[str, Any]:
         },
         {
             "id": 5,
-            "goal": "Proceed to checkout",
+            "goal": "Click the 'Proceed to checkout' button",
             "action": "CLICK",
             "intent": "proceed_to_checkout",
             "verify": [
