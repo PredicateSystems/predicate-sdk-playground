@@ -43,7 +43,7 @@ from sentience.backends.sentience_context import SentienceContext
 from sentience.cursor_policy import CursorPolicy
 from sentience.failure_artifacts import FailureArtifactsOptions
 from sentience.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
-from sentience.models import SnapshotOptions
+from sentience.models import ScreenshotConfig, SnapshotOptions
 from sentience.tracer_factory import create_tracer
 from sentience.verification import (
     all_of,
@@ -1897,7 +1897,7 @@ async def main() -> None:
     )
 
     async with AsyncSentienceBrowser(
-        headless=False, user_data_dir=".user_data"
+        api_key=sentience_api_key, headless=False, user_data_dir=".user_data"
     ) as browser:
         if browser.page is None:
             raise RuntimeError("Browser page not initialized")
@@ -1909,7 +1909,7 @@ async def main() -> None:
             sentience_api_key=sentience_api_key,
             snapshot_options=SnapshotOptions(
                 limit=50,
-                screenshot=True,
+                screenshot=ScreenshotConfig(format="jpeg", quality=80),
                 show_overlay=True,
                 goal="User planner + executor to buy laptop on Amazon.com",
                 use_api=True if use_api else None,
