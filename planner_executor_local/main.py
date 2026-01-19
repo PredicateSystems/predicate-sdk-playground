@@ -41,6 +41,7 @@ from sentience.async_api import AsyncSentienceBrowser
 from sentience.backends.playwright_backend import PlaywrightBackend
 from sentience.backends.sentience_context import SentienceContext
 from sentience.cursor_policy import CursorPolicy
+from sentience.failure_artifacts import FailureArtifactsOptions
 from sentience.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
 from sentience.models import SnapshotOptions
 from sentience.tracer_factory import create_tracer
@@ -54,6 +55,7 @@ from sentience.verification import (
     url_contains,
     url_matches,
 )
+from sentience import CaptchaOptions, HumanHandoffSolver
 
 
 SEARCH_QUERY = os.getenv("AMAZON_QUERY", "laptop")
@@ -200,6 +202,37 @@ def find_no_thanks_button_id(snap) -> int | None:
             doc_y = getattr(el, "doc_y", None)
             importance = getattr(el, "importance", 0) or 0
             candidates.append((not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id))
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][3]
+
+
+def find_checkout_button_id(snap) -> int | None:
+    if not snap or not getattr(snap, "elements", None):
+        return None
+    candidates = []
+    for el in snap.elements:
+        try:
+            role = getattr(el, "role", "")
+            if role not in {"button", "link"}:
+                continue
+            text = (getattr(el, "text", "") or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if "checkout" not in lowered and "proceed to checkout" not in lowered:
+                continue
+            if "add to cart" in lowered or "buy now" in lowered:
+                continue
+            in_viewport = bool(getattr(el, "in_viewport", True))
+            doc_y = getattr(el, "doc_y", None)
+            importance = getattr(el, "importance", 0) or 0
+            candidates.append(
+                (not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
+            )
         except Exception:
             continue
     if not candidates:
@@ -599,6 +632,13 @@ def build_executor_prompt(
             "3) Do NOT click 'Add to cart' or 'Buy now' while the drawer is visible.\n"
             "4) If multiple 'No thanks' options exist, choose the one inside the drawer.\n\n"
         )
+    elif intent_lower in {"proceed_to_checkout", "checkout"}:
+        extra_rules = (
+            "CRITICAL RULES FOR CHECKOUT:\n"
+            "1) Click the checkout button/link labeled 'Proceed to checkout' or 'Checkout'.\n"
+            "2) Do NOT click product links, sponsored items, or add-on offers.\n"
+            "3) Prefer buttons in the cart summary / checkout panel.\n\n"
+        )
     user = (
         "You are controlling a browser via element IDs.\n\n"
         "You must respond with exactly ONE action in this format:\n"
@@ -653,6 +693,8 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
             intent_lower = intent.strip().lower()
             if intent_lower in {"product_link", "first_product", "product_list_item"}:
                 step["intent"] = "first_product_link"
+            if intent_lower in {"dismiss_drawer", "no_thanks_button", "no_thanks"}:
+                step["intent"] = "drawer_no_thanks"
         verify = step.get("verify")
         if isinstance(verify, list):
             for v in verify:
@@ -1255,9 +1297,15 @@ async def run_executor_step(
         target = step.get("target", DEFAULT_PLAN_URL)
         await browser.goto(target)
         await browser.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        await runtime.record_action("NAVIGATE")
         snap = await runtime.snapshot()
         if snap is not None:
             compact = ctx_formatter._format_snapshot_for_llm(snap)
+            runtime.tracer.emit(
+                "note",
+                {"kind": "compact_prompt", "text": compact},
+                step_id=getattr(runtime, "step_id", None),
+            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1271,6 +1319,11 @@ async def run_executor_step(
         )
         if pre_snap is not None:
             pre_compact = ctx_formatter._format_snapshot_for_llm(pre_snap)
+            runtime.tracer.emit(
+                "note",
+                {"kind": "compact_prompt", "text": pre_compact},
+                step_id=getattr(runtime, "step_id", None),
+            )
             print("\n--- Compact prompt (pre-type snapshot) ---", flush=True)
             print(pre_compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1280,6 +1333,17 @@ async def run_executor_step(
             )
             focus_resp = executor.generate(
                 sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
+            )
+            runtime.tracer.emit(
+                "llm",
+                {
+                    "model": executor.model_name,
+                    "prompt_tokens": focus_resp.prompt_tokens,
+                    "completion_tokens": focus_resp.completion_tokens,
+                    "total_tokens": focus_resp.total_tokens,
+                    "output": focus_resp.content,
+                },
+                step_id=getattr(runtime, "step_id", None),
             )
             focus_id = parse_click_id(focus_resp.content)
             print(
@@ -1299,6 +1363,7 @@ async def run_executor_step(
                     browser, focus_id, use_mouse=True, cursor_policy=cursor_policy
                 )
                 await browser.page.wait_for_timeout(400)
+                await runtime.record_action("CLICK")
 
         text = step.get("input", SEARCH_QUERY)
         await type_with_stealth(browser.page, text)
@@ -1321,6 +1386,7 @@ async def run_executor_step(
             await type_with_stealth(browser.page, text)
         await press_async(browser, "Enter")
         await browser.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        await runtime.record_action("TYPE_AND_SUBMIT")
         try:
             await browser.page.wait_for_load_state("networkidle", timeout=8_000)
         except Exception:
@@ -1345,6 +1411,11 @@ async def run_executor_step(
         )
         if snap is not None:
             compact = ctx_formatter._format_snapshot_for_llm(snap)
+            runtime.tracer.emit(
+                "note",
+                {"kind": "compact_prompt", "text": compact},
+                step_id=getattr(runtime, "step_id", None),
+            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1362,9 +1433,15 @@ async def run_executor_step(
             amount = abs(amount)
         await browser.page.mouse.wheel(0, amount)
         await browser.page.wait_for_timeout(900)
+        await runtime.record_action("SCROLL")
         snap = await runtime.snapshot(limit=60, screenshot=False, goal=goal)
         if snap is not None:
             compact = ctx_formatter._format_snapshot_for_llm(snap)
+            runtime.tracer.emit(
+                "note",
+                {"kind": "compact_prompt", "text": compact},
+                step_id=getattr(runtime, "step_id", None),
+            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1418,6 +1495,11 @@ async def run_executor_step(
         if snap is None:
             return False, "snapshot_missing"
         compact = ctx_formatter._format_snapshot_for_llm(snap)
+        runtime.tracer.emit(
+            "note",
+            {"kind": "compact_prompt", "text": compact},
+            step_id=getattr(runtime, "step_id", None),
+        )
         print("\n--- Compact prompt (snapshot) ---", flush=True)
         print(compact, flush=True)
         print("--- end compact prompt ---\n", flush=True)
@@ -1435,10 +1517,34 @@ async def run_executor_step(
                     f"  [warn] drawer_no_thanks preselect failed: {exc}",
                     flush=True,
                 )
+        elif intent_lower in {"proceed_to_checkout", "checkout"}:
+            try:
+                preferred_id = find_checkout_button_id(snap)
+                if preferred_id is not None:
+                    print(
+                        f"  [fallback] proceed_to_checkout preselect -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(
+                    f"  [warn] proceed_to_checkout preselect failed: {exc}",
+                    flush=True,
+                )
 
         sys_prompt, user_prompt = build_executor_prompt(exec_goal, intent, compact)
         resp = executor.generate(
             sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
+        )
+        runtime.tracer.emit(
+            "llm",
+            {
+                "model": executor.model_name,
+                "prompt_tokens": resp.prompt_tokens,
+                "completion_tokens": resp.completion_tokens,
+                "total_tokens": resp.total_tokens,
+                "output": resp.content,
+            },
+            step_id=getattr(runtime, "step_id", None),
         )
         click_id = parse_click_id(resp.content)
         print(
@@ -1464,6 +1570,19 @@ async def run_executor_step(
             except Exception as exc:
                 print(
                     f"  [warn] drawer_no_thanks override failed: {exc}",
+                    flush=True,
+                )
+        elif intent_lower in {"proceed_to_checkout", "checkout"}:
+            try:
+                if preferred_id is not None and preferred_id != click_id:
+                    print(
+                        f"  [override] proceed_to_checkout -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+                    click_id = preferred_id
+            except Exception as exc:
+                print(
+                    f"  [warn] proceed_to_checkout override failed: {exc}",
                     flush=True,
                 )
         if click_id is None:
@@ -1497,6 +1616,7 @@ async def run_executor_step(
             browser, click_id, use_mouse=True, cursor_policy=cursor_policy
         )
         await browser.page.wait_for_timeout(1200)
+        await runtime.record_action("CLICK")
         snap_after = await runtime.snapshot()
         post_url = browser.page.url if browser.page else ""
         url_changed = bool(pre_url and post_url and pre_url != post_url)
@@ -1504,6 +1624,11 @@ async def run_executor_step(
         compact_after = None
         if snap_after is not None:
             compact_after = ctx_formatter._format_snapshot_for_llm(snap_after)
+            runtime.tracer.emit(
+                "note",
+                {"kind": "compact_prompt", "text": compact_after},
+                step_id=getattr(runtime, "step_id", None),
+            )
             print("\n--- Compact prompt (post-click snapshot) ---", flush=True)
             print(compact_after, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1545,6 +1670,7 @@ async def run_executor_step(
                     browser, vision_id, use_mouse=True, cursor_policy=cursor_policy
                 )
                 await browser.page.wait_for_timeout(1200)
+                await runtime.record_action("CLICK")
                 await runtime.snapshot()
                 ok = await apply_verifications(runtime, verify, required)
                 if ok:
@@ -1574,8 +1700,6 @@ async def maybe_run_optional_substeps(
     if not optional:
         return
     if intent_lower == "add_to_cart":
-        if step.get("_url_changed"):
-            return
         if not step_ok:
             fallback = [
                 sub
@@ -1604,8 +1728,6 @@ async def maybe_run_optional_substeps(
             if str(sub.get("action") or "").upper() != "SCROLL"
             and "retry" not in str(sub.get("intent") or "").lower()
         ]
-        if not drawer_subs:
-            return
         # Predicate-driven drawer detection (no text scanning heuristics)
         drawer_visible = await runtime.check(
             any_of(
@@ -1618,6 +1740,21 @@ async def maybe_run_optional_substeps(
         ).eventually(timeout_s=3.0, poll_s=0.4, max_snapshot_attempts=4)
         if not drawer_visible:
             return
+        if not drawer_subs:
+            drawer_subs = [
+                {
+                    "goal": "Dismiss the add-on drawer by clicking 'No thanks'",
+                    "action": "CLICK",
+                    "intent": "drawer_no_thanks",
+                    "verify": [
+                        {
+                            "predicate": "not_exists",
+                            "args": ["text~'Add to Your Order'"],
+                        }
+                    ],
+                    "required": False,
+                }
+            ]
         for sub in drawer_subs:
             await run_executor_step(
                 sub,
@@ -1674,6 +1811,7 @@ async def main() -> None:
     sentience_api_key = os.getenv("SENTIENCE_API_KEY")
     use_api = bool((sentience_api_key or "").strip())
     run_id = str(uuid.uuid4())
+    run_start_ts = time.time()
     feedback_dir = Path(__file__).parent / "planner_feedback"
     feedback_path = feedback_dir / f"{run_id}.jsonl"
     summary_path = feedback_dir / f"{run_id}.summary.json"
@@ -1692,14 +1830,33 @@ async def main() -> None:
     tracer = create_tracer(
         api_key=sentience_api_key,
         run_id=run_id,
-        upload_trace=bool(sentience_api_key),
+        upload_trace=True if sentience_api_key else False,
         goal="Amazon planner + executor demo",
         agent_type="planner_executor_local",
         llm_model=f"{planner_model} -> {executor_model}",
         start_url=DEFAULT_PLAN_URL,
     )
     tracer.emit_run_start(
-        agent="PlannerExecutorDemo", llm_model=planner_model, config={}
+        agent="PlannerExecutorDemo",
+        llm_model=planner_model,
+        config={
+            "snapshot_limit": 50,
+            "capture_screenshots": True,
+            "show_overlay": True,
+            "use_api": bool(use_api),
+            "planner_model": planner_model,
+            "executor_model": executor_model,
+            "search_query": SEARCH_QUERY,
+            "max_replans": int(os.getenv("MAX_REPLANS", "1")),
+            "planner_mode": os.getenv("PLANNER_MODE", "diet"),
+            "vision_fallback": os.getenv("ENABLE_VISION_FALLBACK", "0") == "1",
+            "failure_artifacts": {
+                "buffer_seconds": 15,
+                "capture_on_action": True,
+                "fps": 0.0,
+                "frame_format": "jpeg",
+            },
+        },
     )
     builtins.print = log_print
     log_print(f"\n=== Executor Log Start: {run_id} @ {now_iso()} ===", flush=True)
@@ -1758,6 +1915,17 @@ async def main() -> None:
                 use_api=True if use_api else None,
                 sentience_api_key=sentience_api_key if use_api else None,
             ),
+        )
+        await runtime.enable_failure_artifacts(
+            FailureArtifactsOptions(
+                buffer_seconds=15,
+                capture_on_action=True,
+                fps=0.0,
+                frame_format="jpeg",
+            )
+        )
+        runtime.set_captcha_options(
+            CaptchaOptions(policy="callback", handler=HumanHandoffSolver())
         )
         ctx_formatter = SentienceContext(max_elements=120)
         cursor_policy = CursorPolicy(
@@ -1920,6 +2088,18 @@ async def main() -> None:
         feedback_dir.mkdir(parents=True, exist_ok=True)
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
+        run_ms = int((time.time() - run_start_ts) * 1000)
+        tracer.emit(
+            "note",
+            {
+                "kind": "run_summary",
+                "success": all_passed,
+                "duration_ms": run_ms,
+                "steps": summary["steps"],
+                "metrics": summary["metrics"],
+            },
+        )
+        runtime.finalize_run(success=all_passed)
         tracer.set_final_status("success" if all_passed else "failure")
         tracer.emit_run_end(
             steps=len(steps), status=("success" if all_passed else "failure")
