@@ -185,6 +185,29 @@ def parse_click_id(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def find_no_thanks_button_id(snap) -> int | None:
+    if not snap or not getattr(snap, "elements", None):
+        return None
+    candidates = []
+    for el in snap.elements:
+        try:
+            if getattr(el, "role", "") != "button":
+                continue
+            text = (getattr(el, "text", "") or "").strip()
+            if "no thanks" not in text.lower():
+                continue
+            in_viewport = bool(getattr(el, "in_viewport", True))
+            doc_y = getattr(el, "doc_y", None)
+            importance = getattr(el, "importance", 0) or 0
+            candidates.append((not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id))
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][3]
+
+
 def build_planner_prompt(
     task: str,
     strict: bool = False,
@@ -201,6 +224,7 @@ def build_planner_prompt(
         "Include explicit verification predicates per step.\n"
         "Use stop_if_true for sign-in redirect after checkout.\n"
         "If 'Add to Cart' is not found on a product page, include optional substeps to scroll down and retry.\n"
+        "Avoid brittle selectors like class=... for search-result clicks; prefer URL-based verifies.\n"
         "If a soft-block page appears on Amazon with a 'Click to Continue' button, "
         "include an optional substep to detect and click it.\n"
         "Do NOT hardcode product URLs like /dp/product-url; use a CLICK step on the first product link."
@@ -273,6 +297,7 @@ Planner contract:
 - Every required step must include >=1 verify predicate.
 - Avoid fragile verify-only checks (e.g., exists("role=textbox")) unless paired with a
   more specific predicate.
+- For first_product_link, use verify url_contains("/dp/") instead of class selectors.
 - Allowed actions: NAVIGATE, CLICK, TYPE_AND_SUBMIT, SCROLL.
 
 Predicates allowed: url_contains, url_matches, exists, not_exists, element_count, any_of, all_of.
@@ -566,6 +591,14 @@ def build_executor_prompt(
             "3) Do NOT follow high importance alone; prioritize ordinality in the dominant group (DG=1, ord=0).\n"
             "4) If multiple matches, choose the FIRST product link in the main results list.\n\n"
         )
+    elif intent_lower in {"drawer_no_thanks", "no_thanks"}:
+        extra_rules = (
+            "CRITICAL RULES FOR ADD-ON DRAWER:\n"
+            "1) Click the button labeled 'No thanks' (case-insensitive) in the add-on drawer.\n"
+            "2) Ignore other buttons like 'Add to Order', 'Add protection', or primary CTA.\n"
+            "3) Do NOT click 'Add to cart' or 'Buy now' while the drawer is visible.\n"
+            "4) If multiple 'No thanks' options exist, choose the one inside the drawer.\n\n"
+        )
     user = (
         "You are controlling a browser via element IDs.\n\n"
         "You must respond with exactly ONE action in this format:\n"
@@ -618,7 +651,7 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
         intent = step.get("intent")
         if isinstance(intent, str):
             intent_lower = intent.strip().lower()
-            if intent_lower in {"product_link", "first_product"}:
+            if intent_lower in {"product_link", "first_product", "product_list_item"}:
                 step["intent"] = "first_product_link"
         verify = step.get("verify")
         if isinstance(verify, list):
@@ -642,6 +675,24 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     if args and isinstance(args[0], str) and "/dp/" in args[0]:
                         v["predicate"] = "url_contains"
                         v["args"] = ["/dp/"]
+        if str(step.get("intent") or "").lower() == "first_product_link":
+            if isinstance(verify, list) and verify:
+                has_class_selector = False
+                for v in verify:
+                    if not isinstance(v, dict):
+                        continue
+                    if v.get("predicate") in {"exists", "not_exists"}:
+                        args = v.get("args") or []
+                        if (
+                            isinstance(args, list)
+                            and len(args) == 1
+                            and isinstance(args[0], str)
+                            and "class=" in args[0]
+                        ):
+                            has_class_selector = True
+                            break
+                if has_class_selector:
+                    step["verify"] = [{"predicate": "url_contains", "args": ["/dp/"]}]
         target = step.get("target")
         if isinstance(target, str) and "product-url" in target:
             # Replace placeholder product URL with a proper click intent.
@@ -1326,10 +1377,14 @@ async def run_executor_step(
         if intent_lower == "add_to_cart":
             exec_goal = "Click the 'Add to Cart' button."
         snap_limit = (
-            120
-            if intent_lower
-            in {"search_box", "first_product_link", "first_search_result"}
-            else 60
+            60
+            if intent_lower in {"drawer_no_thanks", "no_thanks"}
+            else (
+                120
+                if intent_lower
+                in {"search_box", "first_product_link", "first_search_result"}
+                else 60
+            )
         )
         if intent_lower in {"first_product_link", "first_search_result"}:
 
@@ -1366,6 +1421,21 @@ async def run_executor_step(
         print("\n--- Compact prompt (snapshot) ---", flush=True)
         print(compact, flush=True)
         print("--- end compact prompt ---\n", flush=True)
+        preferred_id = None
+        if intent_lower in {"drawer_no_thanks", "no_thanks"}:
+            try:
+                preferred_id = find_no_thanks_button_id(snap)
+                if preferred_id is not None:
+                    print(
+                        f"  [fallback] drawer_no_thanks preselect -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(
+                    f"  [warn] drawer_no_thanks preselect failed: {exc}",
+                    flush=True,
+                )
+
         sys_prompt, user_prompt = build_executor_prompt(exec_goal, intent, compact)
         resp = executor.generate(
             sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
@@ -1383,6 +1453,19 @@ async def run_executor_step(
             ),
             flush=True,
         )
+        if intent_lower in {"drawer_no_thanks", "no_thanks"}:
+            try:
+                if preferred_id is not None and preferred_id != click_id:
+                    print(
+                        f"  [override] drawer_no_thanks -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+                    click_id = preferred_id
+            except Exception as exc:
+                print(
+                    f"  [warn] drawer_no_thanks override failed: {exc}",
+                    flush=True,
+                )
         if click_id is None:
             runtime.assert_(
                 exists("role=button"), label="llm_failed_to_pick_click", required=True
