@@ -43,7 +43,7 @@ from sentience.backends.sentience_context import SentienceContext
 from sentience.cursor_policy import CursorPolicy
 from sentience.failure_artifacts import FailureArtifactsOptions
 from sentience.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
-from sentience.models import ScreenshotConfig, SnapshotOptions
+from sentience.models import SnapshotOptions
 from sentience.tracer_factory import create_tracer
 from sentience.verification import (
     all_of,
@@ -58,7 +58,7 @@ from sentience.verification import (
 from sentience import CaptchaOptions, HumanHandoffSolver
 
 
-SEARCH_QUERY = os.getenv("AMAZON_QUERY", "laptop")
+SEARCH_QUERY = os.getenv("AMAZON_QUERY", "thinkpad")
 DEFAULT_PLAN_URL = "https://www.amazon.com"
 
 
@@ -241,6 +241,37 @@ def find_checkout_button_id(snap) -> int | None:
     return candidates[0][3]
 
 
+def find_search_box_id(snap) -> int | None:
+    if not snap or not getattr(snap, "elements", None):
+        return None
+    candidates = []
+    for el in snap.elements:
+        try:
+            role = (getattr(el, "role", "") or "").lower()
+            if role not in {"searchbox", "textbox", "combobox"}:
+                continue
+            text = (getattr(el, "text", "") or "").strip()
+            in_viewport = bool(getattr(el, "in_viewport", True))
+            doc_y = getattr(el, "doc_y", None)
+            importance = getattr(el, "importance", 0) or 0
+            prefers_search = 0 if "search" in text.lower() else 1
+            candidates.append(
+                (
+                    not in_viewport,
+                    prefers_search,
+                    doc_y if doc_y is not None else 1e9,
+                    -importance,
+                    el.id,
+                )
+            )
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][4]
+
+
 def build_planner_prompt(
     task: str,
     strict: bool = False,
@@ -372,13 +403,13 @@ Format example (match keys exactly):
       "id": 3,
       "goal": "Type search query and submit",
       "action": "TYPE_AND_SUBMIT",
-      "input": "laptop",
-      "verify": [{{ "predicate": "url_contains", "args": ["k=laptop"] }}],
+      "input": "thinkpad",
+      "verify": [{{ "predicate": "url_contains", "args": ["k=thinkpad"] }}],
       "required": true
     }},
     {{
       "id": 4,
-      "goal": "Click the first product in search results",
+      "goal": "Click the first product in search results, go to product details page",
       "action": "CLICK",
       "intent": "first_product_link",
       "verify": [{{ "predicate": "url_contains", "args": ["/dp/"] }}],
@@ -436,7 +467,7 @@ Reason: redundant CLICK intents back-to-back.
 Smooth example (VALID):
 {{"steps":[
   {{"id":1,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"exists","args":["role=textbox"]}}],"required":true}},
-  {{"id":2,"action":"TYPE_AND_SUBMIT","input":"laptop","verify":[{{"predicate":"url_contains","args":["k=laptop"]}}],"required":true}}
+  {{"id":2,"action":"TYPE_AND_SUBMIT","input":"thinkpad","verify":[{{"predicate":"url_contains","args":["k=thinkpad"]}}],"required":true}}
 ]}}
 
 {schema_note}
@@ -623,6 +654,20 @@ def build_executor_prompt(
             "2) Ignore menu items or top nav links (e.g., 'Amazon Haul').\n"
             "3) Do NOT follow high importance alone; prioritize ordinality in the dominant group (DG=1, ord=0).\n"
             "4) If multiple matches, choose the FIRST product link in the main results list.\n\n"
+        )
+    elif intent_lower in {"search_box", "search_input"}:
+        extra_rules = (
+            "CRITICAL RULES FOR SEARCH BOX:\n"
+            "1) Click the search input (role=searchbox/textbox/combobox).\n"
+            "2) Do NOT click language links or settings (e.g., 'Choose a language for shopping').\n"
+            "3) Prefer inputs with placeholder text containing 'Search'.\n\n"
+        )
+    elif intent_lower in {"add_to_cart", "add_to_cart_retry"}:
+        extra_rules = (
+            "CRITICAL RULES FOR ADD TO CART:\n"
+            "1) Click the 'Add to cart' button on the product page.\n"
+            "2) If a drawer/popup shows 'No thanks', click 'No thanks' instead.\n"
+            "3) Do NOT click 'Buy now' or product links.\n\n"
         )
     elif intent_lower in {"drawer_no_thanks", "no_thanks"}:
         extra_rules = (
@@ -1184,7 +1229,7 @@ def ensure_minimum_plan(plan: dict[str, Any], query: str) -> dict[str, Any]:
         },
         {
             "id": 4,
-            "goal": "Add product to cart and handle optional drawer",
+            "goal": "Click the 'Add to cart' button and handle optional drawer popup",
             "action": "CLICK",
             "intent": "add_to_cart",
             "verify": [
@@ -1200,14 +1245,14 @@ def ensure_minimum_plan(plan: dict[str, Any], query: str) -> dict[str, Any]:
             "optional_substeps": [
                 {
                     "id": 1,
-                    "goal": "Scroll down if the Add to Cart button is not visible",
+                    "goal": "Scroll down if the 'Add to cart' button is not visible",
                     "action": "SCROLL",
                     "target": "down",
                     "required": False,
                 },
                 {
                     "id": 2,
-                    "goal": "Retry clicking Add to Cart after scrolling",
+                    "goal": "Retry clicking 'Add to cart' after scrolling",
                     "action": "CLICK",
                     "intent": "add_to_cart_retry",
                     "verify": [
@@ -1331,6 +1376,16 @@ async def run_executor_step(
             sys_prompt, user_prompt = build_executor_prompt(
                 focus_goal, "search_box", pre_compact
             )
+            preferred_id = None
+            try:
+                preferred_id = find_search_box_id(pre_snap)
+                if preferred_id is not None:
+                    print(
+                        f"  [fallback] search_box preselect -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(f"  [warn] search_box preselect failed: {exc}", flush=True)
             focus_resp = executor.generate(
                 sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
             )
@@ -1358,6 +1413,12 @@ async def run_executor_step(
                 ),
                 flush=True,
             )
+            if preferred_id is not None and preferred_id != focus_id:
+                print(
+                    f"  [override] search_box -> CLICK({preferred_id})",
+                    flush=True,
+                )
+                focus_id = preferred_id
             if focus_id is not None:
                 await click_async(
                     browser, focus_id, use_mouse=True, cursor_policy=cursor_policy
@@ -1457,7 +1518,7 @@ async def run_executor_step(
             60
             if intent_lower in {"drawer_no_thanks", "no_thanks"}
             else (
-                120
+                60
                 if intent_lower
                 in {"search_box", "first_product_link", "first_search_result"}
                 else 60
@@ -1517,6 +1578,19 @@ async def run_executor_step(
                     f"  [warn] drawer_no_thanks preselect failed: {exc}",
                     flush=True,
                 )
+        elif intent_lower in {"add_to_cart", "add_to_cart_retry"}:
+            try:
+                preferred_id = find_no_thanks_button_id(snap)
+                if preferred_id is not None:
+                    print(
+                        f"  [fallback] add_to_cart drawer detected -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(
+                    f"  [warn] add_to_cart drawer preselect failed: {exc}",
+                    flush=True,
+                )
         elif intent_lower in {"proceed_to_checkout", "checkout"}:
             try:
                 preferred_id = find_checkout_button_id(snap)
@@ -1570,6 +1644,19 @@ async def run_executor_step(
             except Exception as exc:
                 print(
                     f"  [warn] drawer_no_thanks override failed: {exc}",
+                    flush=True,
+                )
+        elif intent_lower in {"add_to_cart", "add_to_cart_retry"}:
+            try:
+                if preferred_id is not None and preferred_id != click_id:
+                    print(
+                        f"  [override] add_to_cart drawer -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+                    click_id = preferred_id
+            except Exception as exc:
+                print(
+                    f"  [warn] add_to_cart drawer override failed: {exc}",
                     flush=True,
                 )
         elif intent_lower in {"proceed_to_checkout", "checkout"}:
@@ -1909,9 +1996,9 @@ async def main() -> None:
             sentience_api_key=sentience_api_key,
             snapshot_options=SnapshotOptions(
                 limit=50,
-                screenshot=ScreenshotConfig(format="jpeg", quality=80),
+                screenshot=True,
                 show_overlay=True,
-                goal="User planner + executor to buy laptop on Amazon.com",
+                goal="User planner + executor to buy thinkpad on Amazon.com",
                 use_api=True if use_api else None,
                 sentience_api_key=sentience_api_key if use_api else None,
             ),
