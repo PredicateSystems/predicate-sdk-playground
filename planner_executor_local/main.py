@@ -680,9 +680,8 @@ def build_executor_prompt(
     elif intent_lower in {"proceed_to_checkout", "checkout"}:
         extra_rules = (
             "CRITICAL RULES FOR CHECKOUT:\n"
-            "1) Click the checkout button/link labeled 'Proceed to checkout' or 'Checkout'.\n"
-            "2) Do NOT click product links, sponsored items, or add-on offers.\n"
-            "3) Prefer buttons in the cart summary / checkout panel.\n\n"
+            "1) Click the 'Proceed to checkout' button.\n"
+            "2) Do NOT click product links, sponsored items, or add-on offers.\n\n"
         )
     user = (
         "You are controlling a browser via element IDs.\n\n"
