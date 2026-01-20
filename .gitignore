@@ -58,3 +58,4 @@ planner_executor_local/.user_data/
 planner_executor_local/traces/
 planner_executor_local/planner_feedback/
 planner_executor_local/executor.log
+planner_executor_local/.sentience

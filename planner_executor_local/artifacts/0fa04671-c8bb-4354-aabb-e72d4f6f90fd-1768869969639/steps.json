@@ -1,0 +1,16 @@
+[
+  {
+    "ts": 1768869918.595165,
+    "action": "NAVIGATE",
+    "step_id": "3162f075-3768-4621-8bb1-2927a8acef50",
+    "step_index": 1,
+    "url": null
+  },
+  {
+    "ts": 1768869948.106702,
+    "action": "CLICK",
+    "step_id": "817011a5-6ecf-40f0-82c6-73dca88e0ad6",
+    "step_index": 2,
+    "url": null
+  }
+]
