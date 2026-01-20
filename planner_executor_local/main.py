@@ -43,7 +43,9 @@ from sentience.backends.sentience_context import SentienceContext
 from sentience.cursor_policy import CursorPolicy
 from sentience.failure_artifacts import FailureArtifactsOptions
 from sentience.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
-from sentience.models import SnapshotOptions
+from sentience.models import Snapshot, SnapshotOptions
+from sentience.snapshot_diff import SnapshotDiff
+from sentience.trace_event_builder import TraceEventBuilder
 from sentience.tracer_factory import create_tracer
 from sentience.verification import (
     all_of,
@@ -187,6 +189,40 @@ def parse_click_id(text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def emit_snapshot_trace(runtime: AgentRuntime, snap: Snapshot) -> None:
+    if not snap:
+        return
+    prev = getattr(runtime, "_trace_prev_snapshot", None)
+    try:
+        elements_with_diff = SnapshotDiff.compute_diff_status(snap, prev)
+        payload = snap.model_dump()
+        payload["elements"] = elements_with_diff
+        snap_with_diff = Snapshot(**payload)
+    except Exception:
+        snap_with_diff = snap
+    setattr(runtime, "_trace_prev_snapshot", snap)
+
+    # Get step_index from runtime for Studio compatibility
+    # AgentRuntime uses UUID step_ids, so we need to include step_index explicitly
+    step_index = getattr(runtime, "step_index", None)
+    snapshot_data = TraceEventBuilder.build_snapshot_event(snap_with_diff, step_index=step_index)
+
+    if snap.screenshot:
+        screenshot_base64 = (
+            snap.screenshot.split(",", 1)[1]
+            if snap.screenshot.startswith("data:image")
+            else snap.screenshot
+        )
+        snapshot_data["screenshot_base64"] = screenshot_base64
+        if snap.screenshot_format:
+            snapshot_data["screenshot_format"] = snap.screenshot_format
+    runtime.tracer.emit(
+        "snapshot",
+        snapshot_data,
+        step_id=getattr(runtime, "step_id", None),
+    )
+
+
 def find_no_thanks_button_id(snap) -> int | None:
     if not snap or not getattr(snap, "elements", None):
         return None
@@ -216,22 +252,34 @@ def find_checkout_button_id(snap) -> int | None:
     candidates = []
     for el in snap.elements:
         try:
-            role = getattr(el, "role", "")
+            role = (getattr(el, "role", "") or "").lower()
             if role not in {"button", "link"}:
                 continue
             text = (getattr(el, "text", "") or "").strip()
-            if not text:
-                continue
-            lowered = text.lower()
+            nearby = (getattr(el, "nearby_text", "") or "").strip()
+            combined = f"{text} {nearby}".strip()
+            lowered = combined.lower()
             if "checkout" not in lowered and "proceed to checkout" not in lowered:
                 continue
-            if "add to cart" in lowered or "buy now" in lowered:
+            if (
+                "add to cart" in lowered
+                or "buy now" in lowered
+                or "add protection" in lowered
+                or "no thanks" in lowered
+            ):
                 continue
             in_viewport = bool(getattr(el, "in_viewport", True))
             doc_y = getattr(el, "doc_y", None)
             importance = getattr(el, "importance", 0) or 0
+            is_checkout_button = 0 if "checkout" in lowered else 1
             candidates.append(
-                (not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
+                (
+                    not in_viewport,
+                    is_checkout_button,
+                    doc_y if doc_y is not None else 1e9,
+                    -importance,
+                    el.id,
+                )
             )
         except Exception:
             continue
@@ -650,10 +698,9 @@ def build_executor_prompt(
     if intent_lower in {"first_product_link", "first_search_result"}:
         extra_rules = (
             "CRITICAL RULES FOR SEARCH RESULTS:\n"
-            "1) ONLY click product links whose href contains '/dp/' or '/gp/product/'.\n"
-            "2) Ignore menu items or top nav links (e.g., 'Amazon Haul').\n"
-            "3) Do NOT follow high importance alone; prioritize ordinality in the dominant group (DG=1, ord=0).\n"
-            "4) If multiple matches, choose the FIRST product link in the main results list.\n\n"
+            "1) ONLY click product whose href contains '/dp/' or '/gp/product/'.\n"
+            "2) Ignore menu items, start rating links, or top nav links (e.g., 'Amazon Haul').\n"
+            "3) Do NOT follow high importance alone; prioritize ordinality (ord=0) in the dominant group (DG=1).\n\n"
         )
     elif intent_lower in {"search_box", "search_input"}:
         extra_rules = (
@@ -739,6 +786,8 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 step["intent"] = "first_product_link"
             if intent_lower in {"dismiss_drawer", "no_thanks_button", "no_thanks"}:
                 step["intent"] = "drawer_no_thanks"
+            if intent_lower in {"add_to_cart_button", "add_to_cart_btn"}:
+                step["intent"] = "add_to_cart"
         verify = step.get("verify")
         if isinstance(verify, list):
             for v in verify:
@@ -1344,12 +1393,8 @@ async def run_executor_step(
         await runtime.record_action("NAVIGATE")
         snap = await runtime.snapshot()
         if snap is not None:
+            emit_snapshot_trace(runtime, snap)
             compact = ctx_formatter._format_snapshot_for_llm(snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1362,12 +1407,8 @@ async def run_executor_step(
             limit=50, screenshot=False, goal="Focus search box before typing"
         )
         if pre_snap is not None:
+            emit_snapshot_trace(runtime, pre_snap)
             pre_compact = ctx_formatter._format_snapshot_for_llm(pre_snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": pre_compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (pre-type snapshot) ---", flush=True)
             print(pre_compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1389,13 +1430,16 @@ async def run_executor_step(
                 sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
             )
             runtime.tracer.emit(
-                "llm",
+                "llm_called",
                 {
                     "model": executor.model_name,
+                    "goal": focus_goal,
+                    "intent": "search_box",
+                    "compact_context": pre_compact,
                     "prompt_tokens": focus_resp.prompt_tokens,
                     "completion_tokens": focus_resp.completion_tokens,
                     "total_tokens": focus_resp.total_tokens,
-                    "output": focus_resp.content,
+                    "response_text": focus_resp.content,
                 },
                 step_id=getattr(runtime, "step_id", None),
             )
@@ -1470,12 +1514,8 @@ async def run_executor_step(
             limit=80, screenshot=False, goal="Search results snapshot"
         )
         if snap is not None:
+            emit_snapshot_trace(runtime, snap)
             compact = ctx_formatter._format_snapshot_for_llm(snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1496,12 +1536,8 @@ async def run_executor_step(
         await runtime.record_action("SCROLL")
         snap = await runtime.snapshot(limit=60, screenshot=False, goal=goal)
         if snap is not None:
+            emit_snapshot_trace(runtime, snap)
             compact = ctx_formatter._format_snapshot_for_llm(snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1554,12 +1590,8 @@ async def run_executor_step(
         snap = await runtime.snapshot(limit=snap_limit, screenshot=False, goal=exec_goal)
         if snap is None:
             return False, "snapshot_missing"
+        emit_snapshot_trace(runtime, snap)
         compact = ctx_formatter._format_snapshot_for_llm(snap)
-        runtime.tracer.emit(
-            "note",
-            {"kind": "compact_prompt", "text": compact},
-            step_id=getattr(runtime, "step_id", None),
-        )
         print("\n--- Compact prompt (snapshot) ---", flush=True)
         print(compact, flush=True)
         print("--- end compact prompt ---\n", flush=True)
@@ -1609,13 +1641,16 @@ async def run_executor_step(
             sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
         )
         runtime.tracer.emit(
-            "llm",
+            "llm_called",
             {
                 "model": executor.model_name,
+                "goal": exec_goal,
+                "intent": intent,
+                "compact_context": compact,
                 "prompt_tokens": resp.prompt_tokens,
                 "completion_tokens": resp.completion_tokens,
                 "total_tokens": resp.total_tokens,
-                "output": resp.content,
+                "response_text": resp.content,
             },
             step_id=getattr(runtime, "step_id", None),
         )
@@ -1709,12 +1744,8 @@ async def run_executor_step(
         step["_url_changed"] = url_changed
         compact_after = None
         if snap_after is not None:
+            emit_snapshot_trace(runtime, snap_after)
             compact_after = ctx_formatter._format_snapshot_for_llm(snap_after)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact_after},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (post-click snapshot) ---", flush=True)
             print(compact_after, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -2071,6 +2102,12 @@ async def main() -> None:
                 ok,
                 note,
             )
+            if (step.get("intent") or "").lower() == "add_to_cart" and not ok:
+                post_ok = await apply_verifications(runtime, verify, required)
+                if post_ok:
+                    ok = True
+                    note = "add_to_cart_verified_after_drawer"
+                    print(f"  result: PASS | {note}", flush=True)
 
             verify_payload = runtime.get_assertions_for_step_end()
             append_jsonl(
@@ -2175,16 +2212,6 @@ async def main() -> None:
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
         run_ms = int((time.time() - run_start_ts) * 1000)
-        tracer.emit(
-            "note",
-            {
-                "kind": "run_summary",
-                "success": all_passed,
-                "duration_ms": run_ms,
-                "steps": summary["steps"],
-                "metrics": summary["metrics"],
-            },
-        )
         runtime.finalize_run(success=all_passed)
         tracer.set_final_status("success" if all_passed else "failure")
         tracer.emit_run_end(
