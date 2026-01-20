@@ -334,12 +334,34 @@ def find_no_thanks_button_id(snap) -> int | None:
     return candidates[0][3]
 
 
+def drawer_visible_in_snapshot(snap) -> bool:
+    if not snap or not getattr(snap, "elements", None):
+        return False
+    for el in snap.elements:
+        try:
+            text = (getattr(el, "text", "") or "").strip()
+            nearby = (getattr(el, "nearby_text", "") or "").strip()
+            combined = f"{text} {nearby}".strip().lower()
+            if (
+                "no thanks" in combined
+                or "add protection" in combined
+                or "add to your order" in combined
+            ):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def find_checkout_button_id(snap) -> int | None:
     if not snap or not getattr(snap, "elements", None):
         return None
     candidates = []
     for el in snap.elements:
         try:
+            el_id = getattr(el, "id", None)
+            if not isinstance(el_id, int) or el_id <= 0:
+                continue
             role = (getattr(el, "role", "") or "").lower()
             if role not in {"button", "link"}:
                 continue
@@ -366,7 +388,7 @@ def find_checkout_button_id(snap) -> int | None:
                     is_checkout_button,
                     doc_y if doc_y is not None else 1e9,
                     -importance,
-                    el.id,
+                    el_id,
                 )
             )
         except Exception:
@@ -974,6 +996,8 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 step["intent"] = "drawer_no_thanks"
             if intent_lower in {"add_to_cart_button", "add_to_cart_btn"}:
                 step["intent"] = "add_to_cart"
+            if intent_lower in {"checkout_button", "checkout_cta"}:
+                step["intent"] = "proceed_to_checkout"
         verify = step.get("verify")
         if isinstance(verify, list):
             for v in verify:
@@ -996,6 +1020,24 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     if args and isinstance(args[0], str) and "/dp/" in args[0]:
                         v["predicate"] = "url_contains"
                         v["args"] = ["/dp/"]
+        if str(step.get("intent") or "").lower() == "proceed_to_checkout":
+            if (
+                isinstance(verify, list)
+                and len(verify) == 1
+                and isinstance(verify[0], dict)
+                and verify[0].get("predicate") == "exists"
+                and verify[0].get("args") == ["role=button"]
+            ):
+                step["verify"] = [
+                    {
+                        "predicate": "any_of",
+                        "args": [
+                            {"predicate": "url_contains", "args": ["signin"]},
+                            {"predicate": "url_contains", "args": ["/ap/"]},
+                            {"predicate": "url_contains", "args": ["checkout"]},
+                        ],
+                    }
+                ]
         if str(step.get("intent") or "").lower() == "first_product_link":
             if isinstance(verify, list) and verify:
                 has_class_selector = False
@@ -1871,9 +1913,14 @@ async def run_executor_step(
         elif intent_lower in {"proceed_to_checkout", "checkout"}:
             try:
                 preferred_id = find_checkout_button_id(snap)
-                if preferred_id is not None:
+                if preferred_id is not None and preferred_id > 0:
                     print(
                         f"  [fallback] proceed_to_checkout preselect -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+                elif preferred_id is not None:
+                    print(
+                        f"  [warn] proceed_to_checkout preselect ignored non-positive id: {preferred_id}",
                         flush=True,
                     )
             except Exception as exc:
@@ -1967,7 +2014,11 @@ async def run_executor_step(
                 )
         elif intent_lower in {"proceed_to_checkout", "checkout"}:
             try:
-                if preferred_id is not None and preferred_id != click_id:
+                if (
+                    preferred_id is not None
+                    and preferred_id > 0
+                    and preferred_id != click_id
+                ):
                     print(
                         f"  [override] proceed_to_checkout -> CLICK({preferred_id})",
                         flush=True,
@@ -2021,6 +2072,35 @@ async def run_executor_step(
             print("\n--- Compact prompt (post-click snapshot) ---", flush=True)
             print(compact_after, flush=True)
             print("--- end compact prompt ---\n", flush=True)
+        if intent_lower == "add_to_cart" and drawer_visible_in_snapshot(snap_after):
+            print(
+                "  [info] add_to_cart drawer detected post-click; handling before verify",
+                flush=True,
+            )
+            drawer_step = {
+                "goal": "Dismiss the add-on drawer by clicking 'No thanks'",
+                "action": "CLICK",
+                "intent": "drawer_no_thanks",
+                "verify": [
+                    {
+                        "predicate": "not_exists",
+                        "args": ["text~'Add to Your Order'"],
+                    }
+                ],
+                "required": False,
+            }
+            await run_executor_step(
+                drawer_step,
+                runtime,
+                browser,
+                executor,
+                ctx_formatter,
+                cursor_policy,
+                vision_llm,
+                feedback_path,
+                run_id,
+            )
+            step["_drawer_handled"] = True
         ok = await apply_verifications(runtime, verify, required)
         if not ok and required and (intent or "").lower() == "search_box":
             # Amazon sometimes reports the search input as searchbox/combobox, not textbox.
@@ -2089,6 +2169,8 @@ async def maybe_run_optional_substeps(
     if not optional:
         return
     if intent_lower == "add_to_cart":
+        if step_ok and step.get("_drawer_handled"):
+            return
         if not step_ok:
             fallback = [
                 sub
