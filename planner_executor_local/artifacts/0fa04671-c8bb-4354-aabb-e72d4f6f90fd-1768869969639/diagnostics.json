@@ -1,0 +1,22 @@
+{
+  "confidence": 1.000001,
+  "reasons": [],
+  "metrics": {
+    "ready_state": "complete",
+    "quiet_ms": 5434.60000000149,
+    "node_count": 3167,
+    "interactive_count": 37,
+    "raw_elements_count": 929
+  },
+  "captcha": {
+    "detected": false,
+    "provider_hint": null,
+    "confidence": 0.0,
+    "evidence": {
+      "text_hits": [],
+      "selector_hits": [],
+      "iframe_src_hits": [],
+      "url_hits": []
+    }
+  }
+}
