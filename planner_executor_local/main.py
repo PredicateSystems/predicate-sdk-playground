@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import builtins
+import importlib
 import json
 import os
 import random
@@ -95,10 +96,10 @@ def get_device_map() -> str:
     override = os.getenv("DEVICE_MAP")
     if override:
         return override
-    # Use "auto" for better layer distribution on MPS (Apple Silicon)
-    # This allows transformers to automatically distribute layers across unified memory
+    # On Apple Silicon, use "mps" to avoid accelerate auto device_map
+    # issues (e.g., inferred max_memory missing "cpu").
     if torch.backends.mps.is_available():
-        return "auto"
+        return "mps"
     return "auto"
 
 
@@ -152,12 +153,25 @@ class LocalHFModel:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        input_ids = self.tokenizer.apply_chat_template(
+        encoding = self.tokenizer.apply_chat_template(
             messages, return_tensors="pt", add_generation_prompt=True
         )
         device = getattr(self.model, "device", "cpu")
+        if hasattr(encoding, "to"):
+            encoding = encoding.to(device)
+        input_ids = None
+        attention_mask = None
+        try:
+            input_ids = encoding["input_ids"]
+            if "attention_mask" in encoding:
+                attention_mask = encoding["attention_mask"]
+        except Exception:
+            input_ids = encoding
         input_ids = input_ids.to(device)
-        attention_mask = torch.ones_like(input_ids)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
         do_sample = temperature > 0
         output_ids = self.model.generate(
             input_ids,
@@ -177,6 +191,65 @@ class LocalHFModel:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
+        )
+
+
+class LocalMLXModel:
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        try:
+            self._mlx_lm = importlib.import_module("mlx_lm")
+        except Exception as exc:
+            raise RuntimeError(
+                "mlx-lm is required for MLX text models. Install with: pip install mlx-lm"
+            ) from exc
+        load_fn = getattr(self._mlx_lm, "load", None)
+        if not load_fn:
+            raise RuntimeError("mlx_lm.load not available in your mlx-lm install.")
+        self.model, self.tokenizer = load_fn(model_name)
+
+    def _build_prompt(self, system: str, user: str) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
+        if callable(apply_chat_template):
+            return apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        return f"{system}\n\n{user}"
+
+    def generate(
+        self,
+        system: str,
+        user: str,
+        max_new_tokens: int = 256,
+        temperature: float = 0.0,
+    ) -> LlmResult:
+        prompt = self._build_prompt(system, user)
+        generate_fn = getattr(self._mlx_lm, "generate", None)
+        if not generate_fn:
+            raise RuntimeError("mlx_lm.generate not available in your mlx-lm install.")
+        kwargs: dict[str, Any] = {"max_tokens": max_new_tokens}
+        if temperature and temperature > 0:
+            try:
+                sample_utils = importlib.import_module("mlx_lm.sample_utils")
+                make_sampler = getattr(sample_utils, "make_sampler", None)
+                if callable(make_sampler):
+                    kwargs["sampler"] = make_sampler(temp=temperature)
+            except Exception:
+                pass
+        text = generate_fn(
+            self.model,
+            self.tokenizer,
+            prompt,
+            **kwargs,
+        )
+        # mlx-lm doesn't expose token usage; keep zeros for now.
+        return LlmResult(
+            content=text.strip(),
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
         )
 
 
@@ -415,7 +488,8 @@ def build_planner_prompt(
         "Avoid brittle selectors like class=... for search-result clicks; prefer URL-based verifies.\n"
         "If a soft-block page appears on Amazon with a 'Click to Continue' button, "
         "include an optional substep to detect and click it.\n"
-        "Do NOT hardcode product URLs like /dp/product-url; use a CLICK step on the first product link."
+        "Do NOT hardcode product URLs like /dp/product-url; use a CLICK step on the first product link.\n"
+        "Return ONLY a JSON object. No explanations, no <think> tags, no code fences."
     )
     strict_note = (
         "\nReturn ONLY a JSON object. Do not include any other text.\n"
@@ -629,11 +703,16 @@ def extract_plan_with_retry(
 ) -> tuple[dict[str, Any], str]:
     last_output = ""
     last_errors = ""
+    planner_name = str(getattr(planner, "model_name", ""))
+    planner_requires_strict = (
+        os.getenv("PLANNER_STRICT", "1").lower() in {"1", "true", "yes"}
+        or "deepseek-r1" in planner_name.lower()
+    )
     for attempt in range(1, max_attempts + 1):
-        max_tokens = 1024 if attempt == 1 else 1536
+        max_tokens = 1536 if attempt == 1 else 2048
         sys_prompt, user_prompt = build_planner_prompt(
             task,
-            strict=(attempt > 1),
+            strict=(planner_requires_strict or attempt > 1),
             schema_errors=last_errors or None,
             start_url=DEFAULT_PLAN_URL,
             site_type="commerce",
@@ -678,7 +757,8 @@ def build_replan_prompt(
         "Edit ONLY the failed step (by id) and optionally the next step.\n"
         "Do not change earlier successful steps.\n"
         "Actions must be one of: NAVIGATE, CLICK, TYPE_AND_SUBMIT.\n"
-        "Do NOT hardcode product URLs like /dp/product-url; use CLICK on a product link."
+        "Do NOT hardcode product URLs like /dp/product-url; use CLICK on a product link.\n"
+        "Return ONLY a JSON object. No explanations, no <think> tags, no code fences."
     )
     strict_note = (
         "\nReturn ONLY a JSON object. Do not include any other text.\n"
@@ -734,14 +814,19 @@ def extract_replan_with_retry(
 ) -> tuple[dict[str, Any], str, str]:
     last_output = ""
     last_errors = ""
+    planner_name = str(getattr(planner, "model_name", ""))
+    planner_requires_strict = (
+        os.getenv("PLANNER_STRICT", "1").lower() in {"1", "true", "yes"}
+        or "deepseek-r1" in planner_name.lower()
+    )
     for attempt in range(1, max_attempts + 1):
-        max_tokens = 768 if attempt == 1 else 1024
+        max_tokens = 1024 if attempt == 1 else 1536
         sys_prompt, user_prompt = build_replan_prompt(
             task,
             failed_step_id=failed_step_id,
             failure_code=failure_code,
             short_note=short_note,
-            strict=(attempt > 1),
+            strict=(planner_requires_strict or attempt > 1),
             schema_errors=last_errors or None,
         )
         resp = planner.generate(
@@ -2134,21 +2219,37 @@ async def maybe_run_optional_substeps(
             run_id,
         )
 
-
+'''
+PLANNER_PROVIDER=mlx \
+PLANNER_MODEL=mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit \
+EXECUTOR_PROVIDER=hf \
+EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct \
+python main.py
+'''
 async def main() -> None:
     load_dotenv()
 
-    planner_model = os.getenv("PLANNER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-    executor_model = os.getenv("EXECUTOR_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+    planner_model = os.getenv(
+        "PLANNER_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+    )
+    executor_model = os.getenv("EXECUTOR_MODEL", "Qwen/Qwen2.5-7B-Instruct")# "Qwen/Qwen2.5-3B-Instruct")
     device_map = get_device_map()
     torch_dtype = get_torch_dtype()
 
-    planner = LocalHFModel(
-        planner_model, device_map=device_map, torch_dtype=torch_dtype
-    )
-    executor = LocalHFModel(
-        executor_model, device_map=device_map, torch_dtype=torch_dtype
-    )
+    planner_provider = (os.getenv("PLANNER_PROVIDER") or "hf").lower()
+    executor_provider = (os.getenv("EXECUTOR_PROVIDER") or "hf").lower()
+    if planner_provider == "mlx":
+        planner = LocalMLXModel(planner_model)
+    else:
+        planner = LocalHFModel(
+            planner_model, device_map=device_map, torch_dtype=torch_dtype
+        )
+    if executor_provider == "mlx":
+        executor = LocalMLXModel(executor_model)
+    else:
+        executor = LocalHFModel(
+            executor_model, device_map=device_map, torch_dtype=torch_dtype
+        )
 
     vision_llm = None
     if os.getenv("ENABLE_VISION_FALLBACK", "0") == "1":
