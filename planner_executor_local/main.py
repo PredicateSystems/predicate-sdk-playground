@@ -2573,6 +2573,15 @@ async def main() -> None:
                     for s in step_stats
                 ],
             }
+            print("\n=== Run Summary ===", flush=True)
+            print(f"run_id: {run_id}", flush=True)
+            print(f"success: {all_passed}", flush=True)
+            print(f"duration_ms: {run_ms}", flush=True)
+            print(f"tokens_total: {total_tokens.total_tokens}", flush=True)
+            print(
+                f"Steps passed: {sum(1 for s in step_stats if s['success'])}/{len(step_stats)}",
+                flush=True,
+            )
             video_output = screenshots_dir / "demo.mp4"
             try:
                 create_demo_video(str(screenshots_dir), token_summary, str(video_output))
