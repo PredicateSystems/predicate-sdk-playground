@@ -1,0 +1,24 @@
+{
+  "run_id": "0fa04671-c8bb-4354-aabb-e72d4f6f90fd",
+  "created_at_ms": 1768869969639,
+  "status": "failure",
+  "reason": "assert_eventually_timeout:verify_1",
+  "buffer_seconds": 15,
+  "frame_count": 1,
+  "frames": [
+    {
+      "file": "frame_1768869948126.jpeg",
+      "ts": null
+    }
+  ],
+  "snapshot": "snapshot.json",
+  "diagnostics": "diagnostics.json",
+  "clip": null,
+  "clip_fps": null,
+  "metadata": {
+    "backend": "PlaywrightBackend",
+    "url": "https://www.amazon.com/"
+  },
+  "frames_redacted": false,
+  "frames_dropped": false
+}
