@@ -20,12 +20,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import builtins
+import importlib
 import json
 import os
 import random
 import re
 import time
 import uuid
+import hashlib
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +38,13 @@ import torch
 from dotenv import load_dotenv
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "amazon_shopping", "shared")
+)
+from video_generator_simple import create_demo_video
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "amazon_shopping_with_assertions"))
+from main import StepTokenUsage
+
 from sentience.actions import click_async, press_async
 from sentience.agent_runtime import AgentRuntime
 from sentience.async_api import AsyncSentienceBrowser
@@ -43,7 +53,9 @@ from sentience.backends.sentience_context import SentienceContext
 from sentience.cursor_policy import CursorPolicy
 from sentience.failure_artifacts import FailureArtifactsOptions
 from sentience.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
-from sentience.models import SnapshotOptions
+from sentience.models import Snapshot, SnapshotOptions
+from sentience.snapshot_diff import SnapshotDiff
+from sentience.trace_event_builder import TraceEventBuilder
 from sentience.tracer_factory import create_tracer
 from sentience.verification import (
     all_of,
@@ -84,10 +96,10 @@ def get_device_map() -> str:
     override = os.getenv("DEVICE_MAP")
     if override:
         return override
-    # Use "auto" for better layer distribution on MPS (Apple Silicon)
-    # This allows transformers to automatically distribute layers across unified memory
+    # On Apple Silicon, use "mps" to avoid accelerate auto device_map
+    # issues (e.g., inferred max_memory missing "cpu").
     if torch.backends.mps.is_available():
-        return "auto"
+        return "mps"
     return "auto"
 
 
@@ -141,12 +153,25 @@ class LocalHFModel:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        input_ids = self.tokenizer.apply_chat_template(
+        encoding = self.tokenizer.apply_chat_template(
             messages, return_tensors="pt", add_generation_prompt=True
         )
         device = getattr(self.model, "device", "cpu")
+        if hasattr(encoding, "to"):
+            encoding = encoding.to(device)
+        input_ids = None
+        attention_mask = None
+        try:
+            input_ids = encoding["input_ids"]
+            if "attention_mask" in encoding:
+                attention_mask = encoding["attention_mask"]
+        except Exception:
+            input_ids = encoding
         input_ids = input_ids.to(device)
-        attention_mask = torch.ones_like(input_ids)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids)
         do_sample = temperature > 0
         output_ids = self.model.generate(
             input_ids,
@@ -169,6 +194,65 @@ class LocalHFModel:
         )
 
 
+class LocalMLXModel:
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        try:
+            self._mlx_lm = importlib.import_module("mlx_lm")
+        except Exception as exc:
+            raise RuntimeError(
+                "mlx-lm is required for MLX text models. Install with: pip install mlx-lm"
+            ) from exc
+        load_fn = getattr(self._mlx_lm, "load", None)
+        if not load_fn:
+            raise RuntimeError("mlx_lm.load not available in your mlx-lm install.")
+        self.model, self.tokenizer = load_fn(model_name)
+
+    def _build_prompt(self, system: str, user: str) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
+        if callable(apply_chat_template):
+            return apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        return f"{system}\n\n{user}"
+
+    def generate(
+        self,
+        system: str,
+        user: str,
+        max_new_tokens: int = 256,
+        temperature: float = 0.0,
+    ) -> LlmResult:
+        prompt = self._build_prompt(system, user)
+        generate_fn = getattr(self._mlx_lm, "generate", None)
+        if not generate_fn:
+            raise RuntimeError("mlx_lm.generate not available in your mlx-lm install.")
+        kwargs: dict[str, Any] = {"max_tokens": max_new_tokens}
+        if temperature and temperature > 0:
+            try:
+                sample_utils = importlib.import_module("mlx_lm.sample_utils")
+                make_sampler = getattr(sample_utils, "make_sampler", None)
+                if callable(make_sampler):
+                    kwargs["sampler"] = make_sampler(temp=temperature)
+            except Exception:
+                pass
+        text = generate_fn(
+            self.model,
+            self.tokenizer,
+            prompt,
+            **kwargs,
+        )
+        # mlx-lm doesn't expose token usage; keep zeros for now.
+        return LlmResult(
+            content=text.strip(),
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+        )
+
+
 def extract_json(text: str) -> dict[str, Any]:
     # Prefer fenced JSON blocks if present.
     fence_match = re.search(r"```json\s*([\s\S]+?)\s*```", text, flags=re.IGNORECASE)
@@ -185,6 +269,46 @@ def extract_json(text: str) -> dict[str, Any]:
 def parse_click_id(text: str) -> int | None:
     m = re.search(r"CLICK\s*\(\s*(\d+)\s*\)", text, flags=re.IGNORECASE)
     return int(m.group(1)) if m else None
+
+
+def emit_snapshot_trace(runtime: AgentRuntime, snap: Snapshot) -> None:
+    if not snap:
+        return
+    prev = getattr(runtime, "_trace_prev_snapshot", None)
+    try:
+        elements_with_diff = SnapshotDiff.compute_diff_status(snap, prev)
+        payload = snap.model_dump()
+        payload["elements"] = elements_with_diff
+        snap_with_diff = Snapshot(**payload)
+    except Exception:
+        snap_with_diff = snap
+    setattr(runtime, "_trace_prev_snapshot", snap)
+    setattr(runtime, "_trace_last_snapshot", snap_with_diff)
+
+    # Include step_index for Studio compatibility
+    step_index = getattr(runtime, "step_index", None)
+    snapshot_data = TraceEventBuilder.build_snapshot_event(snap_with_diff)
+    if step_index is not None:
+        snapshot_data["step_index"] = step_index
+
+    if snap.screenshot:
+        screenshot_base64 = (
+            snap.screenshot.split(",", 1)[1]
+            if snap.screenshot.startswith("data:image")
+            else snap.screenshot
+        )
+        snapshot_data["screenshot_base64"] = screenshot_base64
+        if snap.screenshot_format:
+            snapshot_data["screenshot_format"] = snap.screenshot_format
+    runtime.tracer.emit(
+        "snapshot",
+        snapshot_data,
+        step_id=getattr(runtime, "step_id", None),
+    )
+
+
+def _compute_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def find_no_thanks_button_id(snap) -> int | None:
@@ -210,28 +334,62 @@ def find_no_thanks_button_id(snap) -> int | None:
     return candidates[0][3]
 
 
+def drawer_visible_in_snapshot(snap) -> bool:
+    if not snap or not getattr(snap, "elements", None):
+        return False
+    for el in snap.elements:
+        try:
+            text = (getattr(el, "text", "") or "").strip()
+            nearby = (getattr(el, "nearby_text", "") or "").strip()
+            combined = f"{text} {nearby}".strip().lower()
+            if (
+                "no thanks" in combined
+                or "add protection" in combined
+                or "add to your order" in combined
+            ):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def find_checkout_button_id(snap) -> int | None:
     if not snap or not getattr(snap, "elements", None):
         return None
     candidates = []
     for el in snap.elements:
         try:
-            role = getattr(el, "role", "")
+            el_id = getattr(el, "id", None)
+            if not isinstance(el_id, int) or el_id <= 0:
+                continue
+            role = (getattr(el, "role", "") or "").lower()
             if role not in {"button", "link"}:
                 continue
             text = (getattr(el, "text", "") or "").strip()
-            if not text:
-                continue
-            lowered = text.lower()
+            nearby = (getattr(el, "nearby_text", "") or "").strip()
+            combined = f"{text} {nearby}".strip()
+            lowered = combined.lower()
             if "checkout" not in lowered and "proceed to checkout" not in lowered:
                 continue
-            if "add to cart" in lowered or "buy now" in lowered:
+            if (
+                "add to cart" in lowered
+                or "buy now" in lowered
+                or "add protection" in lowered
+                or "no thanks" in lowered
+            ):
                 continue
             in_viewport = bool(getattr(el, "in_viewport", True))
             doc_y = getattr(el, "doc_y", None)
             importance = getattr(el, "importance", 0) or 0
+            is_checkout_button = 0 if "checkout" in lowered else 1
             candidates.append(
-                (not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
+                (
+                    not in_viewport,
+                    is_checkout_button,
+                    doc_y if doc_y is not None else 1e9,
+                    -importance,
+                    el_id,
+                )
             )
         except Exception:
             continue
@@ -272,6 +430,67 @@ def find_search_box_id(snap) -> int | None:
     return candidates[0][4]
 
 
+def find_first_product_link_id(snap, keyword: str) -> int | None:
+    if not snap or not getattr(snap, "elements", None):
+        return None
+    key = (keyword or "").strip().lower()
+    candidates = []
+    for el in snap.elements:
+        try:
+            role = (getattr(el, "role", "") or "").lower()
+            if role != "link":
+                continue
+            text = (getattr(el, "text", "") or "").strip()
+            if not text or key not in text.lower():
+                continue
+            href = (getattr(el, "href", "") or "").lower()
+            if "/dp/" not in href and "/gp/product/" not in href:
+                continue
+            in_viewport = bool(getattr(el, "in_viewport", True))
+            doc_y = getattr(el, "doc_y", None)
+            importance = getattr(el, "importance", 0) or 0
+            candidates.append(
+                (not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
+            )
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][3]
+
+
+def find_add_to_cart_button_id(snap) -> int | None:
+    if not snap or not getattr(snap, "elements", None):
+        return None
+    candidates = []
+    for el in snap.elements:
+        try:
+            role = (getattr(el, "role", "") or "").lower()
+            if role != "button":
+                continue
+            text = (getattr(el, "text", "") or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if "add to cart" not in lowered:
+                continue
+            if "buy now" in lowered:
+                continue
+            in_viewport = bool(getattr(el, "in_viewport", True))
+            doc_y = getattr(el, "doc_y", None)
+            importance = getattr(el, "importance", 0) or 0
+            candidates.append(
+                (not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
+            )
+        except Exception:
+            continue
+    if not candidates:
+        return None
+    candidates.sort()
+    return candidates[0][3]
+
+
 def build_planner_prompt(
     task: str,
     strict: bool = False,
@@ -291,7 +510,8 @@ def build_planner_prompt(
         "Avoid brittle selectors like class=... for search-result clicks; prefer URL-based verifies.\n"
         "If a soft-block page appears on Amazon with a 'Click to Continue' button, "
         "include an optional substep to detect and click it.\n"
-        "Do NOT hardcode product URLs like /dp/product-url; use a CLICK step on the first product link."
+        "Do NOT hardcode product URLs like /dp/product-url; use a CLICK step on the first product link.\n"
+        "Return ONLY a JSON object. No explanations, no <think> tags, no code fences."
     )
     strict_note = (
         "\nReturn ONLY a JSON object. Do not include any other text.\n"
@@ -326,7 +546,7 @@ def build_planner_prompt(
         "site_type": site,
         "auth_state": auth_state or "unknown",
         "constraints": {
-            "max_steps": 6,
+            "max_steps": 8,
             "no_vision": True,
             "abort_on_captcha": True,
             "allowed_actions": ["navigate", "click", "type", "press", "scroll", "wait", "assert"],
@@ -354,10 +574,10 @@ Task payload (diet mode):
 
 Planner contract:
 - Use ONLY the fields in the schema example below.
-- Max required steps: 6 (optional_substeps do not count).
+- Max required steps: 8 (optional_substeps do not count).
 - One action per step. Do not repeat similar CLICK intents back-to-back.
 - For search flows, the core template is mandatory:
-  NAVIGATE → CLICK(search_box) → TYPE_AND_SUBMIT(query) → CLICK(first_product_link) → ...
+  NAVIGATE → CLICK(search_box) → TYPE_AND_SUBMIT(query) → CLICK(first_product_link) → CLICK(add_to_cart) → NAVIGATE(cart) → CLICK(proceed_to_checkout)
 - Every required step must include >=1 verify predicate.
 - Avoid fragile verify-only checks (e.g., exists("role=textbox")) unless paired with a
   more specific predicate.
@@ -454,6 +674,31 @@ Format example (match keys exactly):
         }}
       ]
     }}
+    ,
+    {{
+      "id": 6,
+      "goal": "Navigate to cart page",
+      "action": "NAVIGATE",
+      "target": "https://www.amazon.com/gp/cart/view.html",
+      "verify": [{{ "predicate": "any_of", "args": [
+        {{ "predicate": "url_contains", "args": ["cart"] }},
+        {{ "predicate": "exists", "args": ["text~'Subtotal'"] }}
+      ]}}],
+      "required": true
+    }},
+    {{
+      "id": 7,
+      "goal": "Proceed to checkout",
+      "action": "CLICK",
+      "intent": "proceed_to_checkout",
+      "verify": [{{ "predicate": "any_of", "args": [
+        {{ "predicate": "url_contains", "args": ["signin"] }},
+        {{ "predicate": "url_contains", "args": ["/ap/"] }},
+        {{ "predicate": "url_contains", "args": ["checkout"] }}
+      ]}}],
+      "required": true,
+      "stop_if_true": true
+    }}
   ]
 }}
 
@@ -480,11 +725,16 @@ def extract_plan_with_retry(
 ) -> tuple[dict[str, Any], str]:
     last_output = ""
     last_errors = ""
+    planner_name = str(getattr(planner, "model_name", ""))
+    planner_requires_strict = (
+        os.getenv("PLANNER_STRICT", "1").lower() in {"1", "true", "yes"}
+        or "deepseek-r1" in planner_name.lower()
+    )
     for attempt in range(1, max_attempts + 1):
-        max_tokens = 1024 if attempt == 1 else 1536
+        max_tokens = 1536 if attempt == 1 else 2048
         sys_prompt, user_prompt = build_planner_prompt(
             task,
-            strict=(attempt > 1),
+            strict=(planner_requires_strict or attempt > 1),
             schema_errors=last_errors or None,
             start_url=DEFAULT_PLAN_URL,
             site_type="commerce",
@@ -529,7 +779,8 @@ def build_replan_prompt(
         "Edit ONLY the failed step (by id) and optionally the next step.\n"
         "Do not change earlier successful steps.\n"
         "Actions must be one of: NAVIGATE, CLICK, TYPE_AND_SUBMIT.\n"
-        "Do NOT hardcode product URLs like /dp/product-url; use CLICK on a product link."
+        "Do NOT hardcode product URLs like /dp/product-url; use CLICK on a product link.\n"
+        "Return ONLY a JSON object. No explanations, no <think> tags, no code fences."
     )
     strict_note = (
         "\nReturn ONLY a JSON object. Do not include any other text.\n"
@@ -585,14 +836,19 @@ def extract_replan_with_retry(
 ) -> tuple[dict[str, Any], str, str]:
     last_output = ""
     last_errors = ""
+    planner_name = str(getattr(planner, "model_name", ""))
+    planner_requires_strict = (
+        os.getenv("PLANNER_STRICT", "1").lower() in {"1", "true", "yes"}
+        or "deepseek-r1" in planner_name.lower()
+    )
     for attempt in range(1, max_attempts + 1):
-        max_tokens = 768 if attempt == 1 else 1024
+        max_tokens = 1024 if attempt == 1 else 1536
         sys_prompt, user_prompt = build_replan_prompt(
             task,
             failed_step_id=failed_step_id,
             failure_code=failure_code,
             short_note=short_note,
-            strict=(attempt > 1),
+            strict=(planner_requires_strict or attempt > 1),
             schema_errors=last_errors or None,
         )
         resp = planner.generate(
@@ -650,10 +906,9 @@ def build_executor_prompt(
     if intent_lower in {"first_product_link", "first_search_result"}:
         extra_rules = (
             "CRITICAL RULES FOR SEARCH RESULTS:\n"
-            "1) ONLY click product links whose href contains '/dp/' or '/gp/product/'.\n"
-            "2) Ignore menu items or top nav links (e.g., 'Amazon Haul').\n"
-            "3) Do NOT follow high importance alone; prioritize ordinality in the dominant group (DG=1, ord=0).\n"
-            "4) If multiple matches, choose the FIRST product link in the main results list.\n\n"
+            "1) ONLY click product whose href contains '/dp/' or '/gp/product/'.\n"
+            "2) Ignore menu items, start rating links, or top nav links (e.g., 'Amazon Haul').\n"
+            "3) Do NOT follow high importance alone; prioritize ordinality (ord=0) in the dominant group (DG=1).\n\n"
         )
     elif intent_lower in {"search_box", "search_input"}:
         extra_rules = (
@@ -739,6 +994,10 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 step["intent"] = "first_product_link"
             if intent_lower in {"dismiss_drawer", "no_thanks_button", "no_thanks"}:
                 step["intent"] = "drawer_no_thanks"
+            if intent_lower in {"add_to_cart_button", "add_to_cart_btn"}:
+                step["intent"] = "add_to_cart"
+            if intent_lower in {"checkout_button", "checkout_cta"}:
+                step["intent"] = "proceed_to_checkout"
         verify = step.get("verify")
         if isinstance(verify, list):
             for v in verify:
@@ -761,6 +1020,24 @@ def normalize_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     if args and isinstance(args[0], str) and "/dp/" in args[0]:
                         v["predicate"] = "url_contains"
                         v["args"] = ["/dp/"]
+        if str(step.get("intent") or "").lower() == "proceed_to_checkout":
+            if (
+                isinstance(verify, list)
+                and len(verify) == 1
+                and isinstance(verify[0], dict)
+                and verify[0].get("predicate") == "exists"
+                and verify[0].get("args") == ["role=button"]
+            ):
+                step["verify"] = [
+                    {
+                        "predicate": "any_of",
+                        "args": [
+                            {"predicate": "url_contains", "args": ["signin"]},
+                            {"predicate": "url_contains", "args": ["/ap/"]},
+                            {"predicate": "url_contains", "args": ["checkout"]},
+                        ],
+                    }
+                ]
         if str(step.get("intent") or "").lower() == "first_product_link":
             if isinstance(verify, list) and verify:
                 has_class_selector = False
@@ -1131,8 +1408,8 @@ def validate_plan_smoothness(plan: dict[str, Any], task: str) -> list[str]:
         return errors
 
     required_steps = [s for s in steps if isinstance(s, dict) and s.get("required", False)]
-    if len(required_steps) > 6:
-        errors.append("smoothness: too many required steps (>6)")
+    if len(required_steps) > 8:
+        errors.append("smoothness: too many required steps (>8)")
 
     prev_click_intent: str | None = None
     for step in steps:
@@ -1282,6 +1559,22 @@ def ensure_minimum_plan(plan: dict[str, Any], query: str) -> dict[str, Any]:
         },
         {
             "id": 5,
+            "goal": "Navigate to cart page",
+            "action": "NAVIGATE",
+            "target": "https://www.amazon.com/gp/cart/view.html",
+            "verify": [
+                {
+                    "predicate": "any_of",
+                    "args": [
+                        {"predicate": "url_contains", "args": ["cart"]},
+                        {"predicate": "exists", "args": ["text~'Subtotal'"]},
+                    ],
+                }
+            ],
+            "required": True,
+        },
+        {
+            "id": 6,
             "goal": "Click the 'Proceed to checkout' button",
             "action": "CLICK",
             "intent": "proceed_to_checkout",
@@ -1291,10 +1584,11 @@ def ensure_minimum_plan(plan: dict[str, Any], query: str) -> dict[str, Any]:
                     "args": [
                         {"predicate": "url_contains", "args": ["signin"]},
                         {"predicate": "url_contains", "args": ["/ap/"]},
+                        {"predicate": "url_contains", "args": ["checkout"]},
                     ],
                 }
             ],
-            "required": False,
+            "required": True,
             "stop_if_true": True,
         },
     ]
@@ -1336,6 +1630,15 @@ async def run_executor_step(
     verify = step.get("verify", [])
 
     runtime.begin_step(goal)
+    pre_url = browser.page.url if browser.page else None
+    runtime.tracer.emit_step_start(
+        step_id=getattr(runtime, "step_id", "step-0"),
+        step_index=getattr(runtime, "step_index", 0),
+        goal=goal,
+        attempt=0,
+        pre_url=pre_url,
+    )
+    setattr(runtime, "_trace_step_pre_url", pre_url)
 
     if action == "NAVIGATE":
         target = step.get("target", DEFAULT_PLAN_URL)
@@ -1344,12 +1647,8 @@ async def run_executor_step(
         await runtime.record_action("NAVIGATE")
         snap = await runtime.snapshot()
         if snap is not None:
+            emit_snapshot_trace(runtime, snap)
             compact = ctx_formatter._format_snapshot_for_llm(snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1362,12 +1661,8 @@ async def run_executor_step(
             limit=50, screenshot=False, goal="Focus search box before typing"
         )
         if pre_snap is not None:
+            emit_snapshot_trace(runtime, pre_snap)
             pre_compact = ctx_formatter._format_snapshot_for_llm(pre_snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": pre_compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (pre-type snapshot) ---", flush=True)
             print(pre_compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1388,14 +1683,30 @@ async def run_executor_step(
             focus_resp = executor.generate(
                 sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
             )
+            setattr(
+                runtime,
+                "_trace_last_llm",
+                {
+                    "response_text": focus_resp.content,
+                    "response_hash": f"sha256:{_compute_hash(focus_resp.content)}",
+                    "usage": {
+                        "prompt_tokens": focus_resp.prompt_tokens,
+                        "completion_tokens": focus_resp.completion_tokens,
+                        "total_tokens": focus_resp.total_tokens,
+                    },
+                },
+            )
             runtime.tracer.emit(
-                "llm",
+                "llm_called",
                 {
                     "model": executor.model_name,
+                    "goal": focus_goal,
+                    "intent": "search_box",
+                    "compact_context": pre_compact,
                     "prompt_tokens": focus_resp.prompt_tokens,
                     "completion_tokens": focus_resp.completion_tokens,
                     "total_tokens": focus_resp.total_tokens,
-                    "output": focus_resp.content,
+                    "response_text": focus_resp.content,
                 },
                 step_id=getattr(runtime, "step_id", None),
             )
@@ -1470,12 +1781,8 @@ async def run_executor_step(
             limit=80, screenshot=False, goal="Search results snapshot"
         )
         if snap is not None:
+            emit_snapshot_trace(runtime, snap)
             compact = ctx_formatter._format_snapshot_for_llm(snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1496,12 +1803,8 @@ async def run_executor_step(
         await runtime.record_action("SCROLL")
         snap = await runtime.snapshot(limit=60, screenshot=False, goal=goal)
         if snap is not None:
+            emit_snapshot_trace(runtime, snap)
             compact = ctx_formatter._format_snapshot_for_llm(snap)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (snapshot) ---", flush=True)
             print(compact, flush=True)
             print("--- end compact prompt ---\n", flush=True)
@@ -1554,12 +1857,8 @@ async def run_executor_step(
         snap = await runtime.snapshot(limit=snap_limit, screenshot=False, goal=exec_goal)
         if snap is None:
             return False, "snapshot_missing"
+        emit_snapshot_trace(runtime, snap)
         compact = ctx_formatter._format_snapshot_for_llm(snap)
-        runtime.tracer.emit(
-            "note",
-            {"kind": "compact_prompt", "text": compact},
-            step_id=getattr(runtime, "step_id", None),
-        )
         print("\n--- Compact prompt (snapshot) ---", flush=True)
         print(compact, flush=True)
         print("--- end compact prompt ---\n", flush=True)
@@ -1579,23 +1878,49 @@ async def run_executor_step(
                 )
         elif intent_lower in {"add_to_cart", "add_to_cart_retry"}:
             try:
-                preferred_id = find_no_thanks_button_id(snap)
-                if preferred_id is not None:
+                drawer_id = find_no_thanks_button_id(snap)
+                if drawer_id is not None:
+                    preferred_id = drawer_id
                     print(
                         f"  [fallback] add_to_cart drawer detected -> CLICK({preferred_id})",
                         flush=True,
                     )
+                else:
+                    preferred_id = find_add_to_cart_button_id(snap)
+                    if preferred_id is not None:
+                        print(
+                            f"  [fallback] add_to_cart preselect -> CLICK({preferred_id})",
+                            flush=True,
+                        )
             except Exception as exc:
                 print(
                     f"  [warn] add_to_cart drawer preselect failed: {exc}",
                     flush=True,
                 )
+        elif intent_lower in {"first_product_link", "first_search_result"}:
+            try:
+                preferred_id = find_first_product_link_id(snap, SEARCH_QUERY)
+                if preferred_id is not None:
+                    print(
+                        f"  [fallback] first_product_link preselect -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(
+                    f"  [warn] first_product_link preselect failed: {exc}",
+                    flush=True,
+                )
         elif intent_lower in {"proceed_to_checkout", "checkout"}:
             try:
                 preferred_id = find_checkout_button_id(snap)
-                if preferred_id is not None:
+                if preferred_id is not None and preferred_id > 0:
                     print(
                         f"  [fallback] proceed_to_checkout preselect -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+                elif preferred_id is not None:
+                    print(
+                        f"  [warn] proceed_to_checkout preselect ignored non-positive id: {preferred_id}",
                         flush=True,
                     )
             except Exception as exc:
@@ -1608,14 +1933,30 @@ async def run_executor_step(
         resp = executor.generate(
             sys_prompt, user_prompt, temperature=0.0, max_new_tokens=24
         )
+        setattr(
+            runtime,
+            "_trace_last_llm",
+            {
+                "response_text": resp.content,
+                "response_hash": f"sha256:{_compute_hash(resp.content)}",
+                "usage": {
+                    "prompt_tokens": resp.prompt_tokens,
+                    "completion_tokens": resp.completion_tokens,
+                    "total_tokens": resp.total_tokens,
+                },
+            },
+        )
         runtime.tracer.emit(
-            "llm",
+            "llm_called",
             {
                 "model": executor.model_name,
+                "goal": exec_goal,
+                "intent": intent,
+                "compact_context": compact,
                 "prompt_tokens": resp.prompt_tokens,
                 "completion_tokens": resp.completion_tokens,
                 "total_tokens": resp.total_tokens,
-                "output": resp.content,
+                "response_text": resp.content,
             },
             step_id=getattr(runtime, "step_id", None),
         )
@@ -1649,7 +1990,7 @@ async def run_executor_step(
             try:
                 if preferred_id is not None and preferred_id != click_id:
                     print(
-                        f"  [override] add_to_cart drawer -> CLICK({preferred_id})",
+                        f"  [override] add_to_cart -> CLICK({preferred_id})",
                         flush=True,
                     )
                     click_id = preferred_id
@@ -1658,9 +1999,26 @@ async def run_executor_step(
                     f"  [warn] add_to_cart drawer override failed: {exc}",
                     flush=True,
                 )
-        elif intent_lower in {"proceed_to_checkout", "checkout"}:
+        elif intent_lower in {"first_product_link", "first_search_result"}:
             try:
                 if preferred_id is not None and preferred_id != click_id:
+                    print(
+                        f"  [override] first_product_link -> CLICK({preferred_id})",
+                        flush=True,
+                    )
+                    click_id = preferred_id
+            except Exception as exc:
+                print(
+                    f"  [warn] first_product_link override failed: {exc}",
+                    flush=True,
+                )
+        elif intent_lower in {"proceed_to_checkout", "checkout"}:
+            try:
+                if (
+                    preferred_id is not None
+                    and preferred_id > 0
+                    and preferred_id != click_id
+                ):
                     print(
                         f"  [override] proceed_to_checkout -> CLICK({preferred_id})",
                         flush=True,
@@ -1709,15 +2067,40 @@ async def run_executor_step(
         step["_url_changed"] = url_changed
         compact_after = None
         if snap_after is not None:
+            emit_snapshot_trace(runtime, snap_after)
             compact_after = ctx_formatter._format_snapshot_for_llm(snap_after)
-            runtime.tracer.emit(
-                "note",
-                {"kind": "compact_prompt", "text": compact_after},
-                step_id=getattr(runtime, "step_id", None),
-            )
             print("\n--- Compact prompt (post-click snapshot) ---", flush=True)
             print(compact_after, flush=True)
             print("--- end compact prompt ---\n", flush=True)
+        if intent_lower == "add_to_cart" and drawer_visible_in_snapshot(snap_after):
+            print(
+                "  [info] add_to_cart drawer detected post-click; handling before verify",
+                flush=True,
+            )
+            drawer_step = {
+                "goal": "Dismiss the add-on drawer by clicking 'No thanks'",
+                "action": "CLICK",
+                "intent": "drawer_no_thanks",
+                "verify": [
+                    {
+                        "predicate": "not_exists",
+                        "args": ["text~'Add to Your Order'"],
+                    }
+                ],
+                "required": False,
+            }
+            await run_executor_step(
+                drawer_step,
+                runtime,
+                browser,
+                executor,
+                ctx_formatter,
+                cursor_policy,
+                vision_llm,
+                feedback_path,
+                run_id,
+            )
+            step["_drawer_handled"] = True
         ok = await apply_verifications(runtime, verify, required)
         if not ok and required and (intent or "").lower() == "search_box":
             # Amazon sometimes reports the search input as searchbox/combobox, not textbox.
@@ -1786,6 +2169,8 @@ async def maybe_run_optional_substeps(
     if not optional:
         return
     if intent_lower == "add_to_cart":
+        if step_ok and step.get("_drawer_handled"):
+            return
         if not step_ok:
             fallback = [
                 sub
@@ -1854,6 +2239,55 @@ async def maybe_run_optional_substeps(
                 run_id,
             )
         return
+    if intent_lower == "proceed_to_checkout" and not step_ok:
+        if not optional:
+            optional = [
+                {
+                    "goal": "Navigate to cart page",
+                    "action": "NAVIGATE",
+                    "target": "https://www.amazon.com/gp/cart/view.html",
+                    "verify": [
+                        {
+                            "predicate": "any_of",
+                            "args": [
+                                {"predicate": "url_contains", "args": ["cart"]},
+                                {"predicate": "exists", "args": ["text~'Subtotal'"]},
+                            ],
+                        }
+                    ],
+                    "required": False,
+                },
+                {
+                    "goal": "Click the 'Proceed to checkout' button",
+                    "action": "CLICK",
+                    "intent": "proceed_to_checkout",
+                    "verify": [
+                        {
+                            "predicate": "any_of",
+                            "args": [
+                                {"predicate": "url_contains", "args": ["signin"]},
+                                {"predicate": "url_contains", "args": ["/ap/"]},
+                                {"predicate": "url_contains", "args": ["checkout"]},
+                            ],
+                        }
+                    ],
+                    "required": False,
+                    "stop_if_true": True,
+                },
+            ]
+        for sub in optional:
+            await run_executor_step(
+                sub,
+                runtime,
+                browser,
+                executor,
+                ctx_formatter,
+                cursor_policy,
+                vision_llm,
+                feedback_path,
+                run_id,
+            )
+        return
     for sub in optional:
         await run_executor_step(
             sub,
@@ -1867,21 +2301,37 @@ async def maybe_run_optional_substeps(
             run_id,
         )
 
-
+'''
+PLANNER_PROVIDER=mlx \
+PLANNER_MODEL=mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit \
+EXECUTOR_PROVIDER=hf \
+EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct \
+python main.py
+'''
 async def main() -> None:
     load_dotenv()
 
-    planner_model = os.getenv("PLANNER_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-    executor_model = os.getenv("EXECUTOR_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+    planner_model = os.getenv(
+        "PLANNER_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+    )
+    executor_model = os.getenv("EXECUTOR_MODEL", "Qwen/Qwen2.5-7B-Instruct")# "Qwen/Qwen2.5-3B-Instruct")
     device_map = get_device_map()
     torch_dtype = get_torch_dtype()
 
-    planner = LocalHFModel(
-        planner_model, device_map=device_map, torch_dtype=torch_dtype
-    )
-    executor = LocalHFModel(
-        executor_model, device_map=device_map, torch_dtype=torch_dtype
-    )
+    planner_provider = (os.getenv("PLANNER_PROVIDER") or "hf").lower()
+    executor_provider = (os.getenv("EXECUTOR_PROVIDER") or "hf").lower()
+    if planner_provider == "mlx":
+        planner = LocalMLXModel(planner_model)
+    else:
+        planner = LocalHFModel(
+            planner_model, device_map=device_map, torch_dtype=torch_dtype
+        )
+    if executor_provider == "mlx":
+        executor = LocalMLXModel(executor_model)
+    else:
+        executor = LocalHFModel(
+            executor_model, device_map=device_map, torch_dtype=torch_dtype
+        )
 
     vision_llm = None
     if os.getenv("ENABLE_VISION_FALLBACK", "0") == "1":
@@ -1948,249 +2398,403 @@ async def main() -> None:
     log_print(f"\n=== Executor Log Start: {run_id} @ {now_iso()} ===", flush=True)
 
     task = f"Amazon shopping flow: search '{SEARCH_QUERY}', select first product, add to cart, proceed to checkout."
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    screenshots_dir = Path(__file__).parent / "screenshots" / timestamp
+    screenshots_dir.mkdir(parents=True, exist_ok=True)
+    total_tokens = StepTokenUsage(0, 0, 0)
+    step_stats: list[dict[str, Any]] = []
+    run_end_emitted = False
+    runtime_finalized = False
+    runtime = None
+    steps: list[dict[str, Any]] = []
     try:
-        plan, raw_plan_output = extract_plan_with_retry(planner, task, max_attempts=2)
-    except Exception as exc:
-        raise RuntimeError(f"Failed to parse planner JSON: {exc}")
-    errors = validate_plan(plan)
-    smoothness = validate_plan_smoothness(plan, task)
-    if errors or smoothness:
-        combined = []
-        if errors:
-            combined.extend(errors)
-        if smoothness:
-            combined.extend(smoothness)
-        raise RuntimeError(
-            "Planner output failed validation:\n- " + "\n- ".join(combined)
-        )
-
-    steps = plan.get("steps", [])
-    if not steps:
-        raise RuntimeError("Planner returned no steps")
-    print("\n=== Planner Plan (decision output) ===", flush=True)
-    print(json.dumps(plan, indent=2), flush=True)
-    print("=== End Planner Plan ===\n", flush=True)
-    append_jsonl(
-        feedback_path,
-        {
-            "event": "plan_created",
-            "run_id": run_id,
-            "model": planner_model,
-            "task": task,
-            "raw_output": raw_plan_output,
-            "plan": plan,
-        },
-    )
-
-    async with AsyncSentienceBrowser(
-        api_key=sentience_api_key, headless=False, user_data_dir=".user_data"
-    ) as browser:
-        if browser.page is None:
-            raise RuntimeError("Browser page not initialized")
-
-        backend = PlaywrightBackend(browser.page)
-        runtime = AgentRuntime(
-            backend=backend,
-            tracer=tracer,
-            sentience_api_key=sentience_api_key,
-            snapshot_options=SnapshotOptions(
-                limit=50,
-                screenshot=True,
-                show_overlay=True,
-                goal="User planner + executor to buy thinkpad on Amazon.com",
-                use_api=True if use_api else None,
-                sentience_api_key=sentience_api_key if use_api else None,
-            ),
-        )
-        await runtime.enable_failure_artifacts(
-            FailureArtifactsOptions(
-                buffer_seconds=15,
-                capture_on_action=True,
-                fps=0.0,
-                frame_format="jpeg",
-            )
-        )
-        runtime.set_captcha_options(
-            CaptchaOptions(policy="callback", handler=HumanHandoffSolver())
-        )
-        ctx_formatter = SentienceContext(max_elements=120)
-        cursor_policy = CursorPolicy(
-            mode="human", duration_ms=550, pause_before_click_ms=120, jitter_px=1.5
-        )
-
-        all_passed = True
-        max_replans = int(os.getenv("MAX_REPLANS", "1"))
-        replans_used = 0
-        step_index = 0
-        summary = {
-            "run_id": run_id,
-            "task": task,
-            "planner_model": planner_model,
-            "executor_model": executor_model,
-            "start_ts": now_iso(),
-            "steps": [],
-            "replans_used": 0,
-            "success": None,
-        }
-        while step_index < len(steps):
-            step = steps[step_index]
-            step_start_ts = time.time()
-            step_start_iso = now_iso()
-            print(
-                f"[{step_start_iso}] Step {step.get('id')}: {step.get('goal')}",
-                flush=True,
-            )
-            print("  Planner step decision:", flush=True)
-            print(json.dumps(step, indent=2), flush=True)
-            ok, note = await run_executor_step(
-                step,
-                runtime,
-                browser,
-                executor,
-                ctx_formatter,
-                cursor_policy,
-                vision_llm,
-                feedback_path,
-                run_id,
-            )
-            step_end_ts = time.time()
-            step_end_iso = now_iso()
-            duration_s = round(step_end_ts - step_start_ts, 3)
-            print(f"  result: {'PASS' if ok else 'FAIL'} | {note}", flush=True)
-            print(f"  step_duration_s: {duration_s}", flush=True)
-            await maybe_run_optional_substeps(
-                step,
-                runtime,
-                browser,
-                executor,
-                ctx_formatter,
-                cursor_policy,
-                vision_llm,
-                feedback_path,
-                run_id,
-                ok,
-                note,
+        try:
+            plan, raw_plan_output = extract_plan_with_retry(planner, task, max_attempts=2)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to parse planner JSON: {exc}")
+        errors = validate_plan(plan)
+        smoothness = validate_plan_smoothness(plan, task)
+        if errors or smoothness:
+            combined = []
+            if errors:
+                combined.extend(errors)
+            if smoothness:
+                combined.extend(smoothness)
+            raise RuntimeError(
+                "Planner output failed validation:\n- " + "\n- ".join(combined)
             )
 
-            verify_payload = runtime.get_assertions_for_step_end()
-            append_jsonl(
-                feedback_path,
-                {
-                    "event": "step_result",
-                    "run_id": run_id,
-                    "step": step,
-                    "success": ok,
-                    "note": note,
-                    "url": browser.page.url if browser.page else "unknown",
-                    "assertions": verify_payload,
-                    "step_start_ts": step_start_iso,
-                    "step_end_ts": step_end_iso,
-                    "duration_s": duration_s,
-                },
-            )
-            summary["steps"].append(
-                {
-                    "id": step.get("id"),
-                    "goal": step.get("goal"),
-                    "success": ok,
-                    "note": note,
-                    "url": browser.page.url if browser.page else "unknown",
-                    "step_start_ts": step_start_iso,
-                    "step_end_ts": step_end_iso,
-                    "duration_s": duration_s,
-                }
-            )
-            if not ok and step.get("required", False):
-                if replans_used < max_replans:
-                    replans_used += 1
-                    summary["replans_used"] = replans_used
-                    failure_code = str(note or "unknown_failure")
-                    short_note = f"id={step.get('id')} goal={step.get('goal')}"
-                    try:
-                        new_plan, raw_replan_output, replan_mode = extract_replan_with_retry(
-                            planner,
-                            task,
-                            current_plan=plan,
-                            failed_step_id=step.get("id"),
-                            failure_code=failure_code,
-                            short_note=short_note,
-                            max_attempts=2,
-                        )
-                        if (
-                            replan_mode != "patch"
-                            and "search_results_not_verified" in failure_code
-                        ):
-                            new_plan = ensure_minimum_plan(new_plan, SEARCH_QUERY)
-                        steps = new_plan.get("steps", [])
-                        if not steps:
-                            raise RuntimeError("Replan returned no steps")
-                        plan = new_plan
-                        append_jsonl(
-                            feedback_path,
-                            {
-                                "event": "replan",
-                                "run_id": run_id,
-                                "model": planner_model,
-                                "failure_code": failure_code,
-                                "note": short_note,
-                                "raw_output": raw_replan_output,
-                                "plan": new_plan,
-                                "mode": replan_mode,
-                            },
-                        )
-                        if replan_mode != "patch":
-                            step_index = 0
-                        continue
-                    except Exception as exc:
-                        all_passed = False
-                        raise RuntimeError(f"Failed to parse replanned JSON: {exc}")
-                else:
-                    all_passed = False
-                    break
-            if step.get("stop_if_true") and ok:
-                runtime.assert_done(
-                    any_of(url_contains("signin"), url_contains("/ap/")),
-                    label="checkout_complete",
-                )
-                break
-            step_index += 1
-
-        summary["success"] = bool(all_passed)
-        summary["end_ts"] = now_iso()
-        # Metrics
-        durations = [s.get("duration_s", 0) for s in summary["steps"]]
-        steps_passed = sum(1 for s in summary["steps"] if s.get("success"))
-        steps_failed = sum(1 for s in summary["steps"] if s.get("success") is False)
-        summary["metrics"] = {
-            "steps_total": len(summary["steps"]),
-            "steps_passed": steps_passed,
-            "steps_failed": steps_failed,
-            "total_duration_s": round(sum(durations), 3),
-            "avg_step_duration_s": (
-                round(sum(durations) / len(durations), 3) if durations else 0
-            ),
-            "replans_used": summary["replans_used"],
-        }
-        feedback_dir.mkdir(parents=True, exist_ok=True)
-        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
-        run_ms = int((time.time() - run_start_ts) * 1000)
-        tracer.emit(
-            "note",
+        steps = plan.get("steps", [])
+        if not steps:
+            raise RuntimeError("Planner returned no steps")
+        print("\n=== Planner Plan (decision output) ===", flush=True)
+        print(json.dumps(plan, indent=2), flush=True)
+        print("=== End Planner Plan ===\n", flush=True)
+        append_jsonl(
+            feedback_path,
             {
-                "kind": "run_summary",
-                "success": all_passed,
-                "duration_ms": run_ms,
-                "steps": summary["steps"],
-                "metrics": summary["metrics"],
+                "event": "plan_created",
+                "run_id": run_id,
+                "model": planner_model,
+                "task": task,
+                "raw_output": raw_plan_output,
+                "plan": plan,
             },
         )
-        runtime.finalize_run(success=all_passed)
-        tracer.set_final_status("success" if all_passed else "failure")
-        tracer.emit_run_end(
-            steps=len(steps), status=("success" if all_passed else "failure")
-        )
-        tracer.close(blocking=True)
+
+        async with AsyncSentienceBrowser(
+            api_key=sentience_api_key, headless=False, user_data_dir=".user_data"
+        ) as browser:
+            if browser.page is None:
+                raise RuntimeError("Browser page not initialized")
+
+            backend = PlaywrightBackend(browser.page)
+            runtime = AgentRuntime(
+                backend=backend,
+                tracer=tracer,
+                sentience_api_key=sentience_api_key,
+                snapshot_options=SnapshotOptions(
+                    limit=50,
+                    screenshot=True,
+                    show_overlay=True,
+                    goal="User planner + executor to buy thinkpad on Amazon.com",
+                    use_api=True if use_api else None,
+                    sentience_api_key=sentience_api_key if use_api else None,
+                ),
+            )
+            await runtime.enable_failure_artifacts(
+                FailureArtifactsOptions(
+                    buffer_seconds=15,
+                    capture_on_action=True,
+                    fps=0.0,
+                    frame_format="jpeg",
+                )
+            )
+            runtime.set_captcha_options(
+                CaptchaOptions(policy="callback", handler=HumanHandoffSolver())
+            )
+            ctx_formatter = SentienceContext(max_elements=120)
+            cursor_policy = CursorPolicy(
+                mode="human", duration_ms=550, pause_before_click_ms=120, jitter_px=1.5
+            )
+
+            all_passed = True
+            max_replans = int(os.getenv("MAX_REPLANS", "1"))
+            replans_used = 0
+            step_index = 0
+            summary = {
+                "run_id": run_id,
+                "task": task,
+                "planner_model": planner_model,
+                "executor_model": executor_model,
+                "start_ts": now_iso(),
+                "steps": [],
+                "replans_used": 0,
+                "success": None,
+            }
+            while step_index < len(steps):
+                step = steps[step_index]
+                step_start_ts = time.time()
+                step_start_iso = now_iso()
+                print(
+                    f"[{step_start_iso}] Step {step.get('id')}: {step.get('goal')}",
+                    flush=True,
+                )
+                print("  Planner step decision:", flush=True)
+                print(json.dumps(step, indent=2), flush=True)
+                ok, note = await run_executor_step(
+                    step,
+                    runtime,
+                    browser,
+                    executor,
+                    ctx_formatter,
+                    cursor_policy,
+                    vision_llm,
+                    feedback_path,
+                    run_id,
+                )
+                step_end_ts = time.time()
+                step_end_iso = now_iso()
+                duration_s = round(step_end_ts - step_start_ts, 3)
+                print(f"  result: {'PASS' if ok else 'FAIL'} | {note}", flush=True)
+                print(f"  step_duration_s: {duration_s}", flush=True)
+                screenshot_path = (
+                    screenshots_dir
+                    / f"scene{step.get('id')}_{str(step.get('goal') or '').replace(' ', '_')[:30]}.png"
+                )
+                try:
+                    if browser.page is not None and not browser.page.is_closed():
+                        await browser.page.screenshot(path=str(screenshot_path), full_page=False)
+                        print(f"  Screenshot saved: {screenshot_path}", flush=True)
+                except Exception as exc:
+                    print(f"  Warning: Failed to save screenshot: {exc}", flush=True)
+                await maybe_run_optional_substeps(
+                    step,
+                    runtime,
+                    browser,
+                    executor,
+                    ctx_formatter,
+                    cursor_policy,
+                    vision_llm,
+                    feedback_path,
+                    run_id,
+                    ok,
+                    note,
+                )
+                if (step.get("intent") or "").lower() == "add_to_cart" and not ok:
+                    step_verify = step.get("verify", [])
+                    step_required = bool(step.get("required", False))
+                    try:
+                        post_ok = await apply_verifications(runtime, step_verify, step_required)
+                    except Exception as exc:
+                        post_ok = False
+                        print(
+                            f"  [warn] post-drawer verify failed: {exc}",
+                            flush=True,
+                        )
+                    if post_ok:
+                        ok = True
+                        note = "add_to_cart_verified_after_drawer"
+                        print(f"  result: PASS | {note}", flush=True)
+
+                verify_payload = runtime.get_assertions_for_step_end()
+                llm_usage = getattr(runtime, "_trace_last_llm", {}).get("usage") or {}
+                if llm_usage:
+                    total_tokens = StepTokenUsage(
+                        total_tokens.prompt_tokens
+                        + int(llm_usage.get("prompt_tokens") or 0),
+                        total_tokens.completion_tokens
+                        + int(llm_usage.get("completion_tokens") or 0),
+                        total_tokens.total_tokens
+                        + int(llm_usage.get("total_tokens") or 0),
+                    )
+                try:
+                    last_snap = getattr(runtime, "_trace_last_snapshot", None)
+                    pre_url = getattr(runtime, "_trace_step_pre_url", None) or ""
+                    post_url = browser.page.url if browser.page else ""
+                    snapshot_digest = None
+                    if last_snap is not None:
+                        snapshot_digest = (
+                            f"sha256:{_compute_hash(f'{pre_url}{last_snap.timestamp}')}"
+                        )
+                        pre_elements = TraceEventBuilder.build_snapshot_event(last_snap).get(
+                            "elements", []
+                        )
+                    else:
+                        pre_elements = None
+                    llm_data = getattr(runtime, "_trace_last_llm", None) or {
+                        "response_text": "",
+                        "response_hash": f"sha256:{_compute_hash('')}",
+                        "usage": {},
+                    }
+                    exec_data = {
+                        "action": str(step.get("action") or "").lower(),
+                        "success": bool(ok),
+                        "note": note,
+                    }
+                    verify_data = {"passed": bool(ok), "signals": {}}
+                    step_end_data = TraceEventBuilder.build_step_end_event(
+                        step_id=getattr(runtime, "step_id", "step-0"),
+                        step_index=getattr(runtime, "step_index", 0),
+                        goal=step.get("goal") or "",
+                        attempt=0,
+                        pre_url=pre_url,
+                        post_url=post_url,
+                        snapshot_digest=snapshot_digest,
+                        llm_data=llm_data,
+                        exec_data=exec_data,
+                        verify_data=verify_data,
+                        pre_elements=pre_elements,
+                        assertions=verify_payload.get("assertions")
+                        if isinstance(verify_payload, dict)
+                        else None,
+                    )
+                    runtime.tracer.emit(
+                        "step_end",
+                        step_end_data,
+                        step_id=getattr(runtime, "step_id", None),
+                    )
+                except Exception as exc:
+                    print(f"  [warn] step_end emit failed: {exc}", flush=True)
+                append_jsonl(
+                    feedback_path,
+                    {
+                        "event": "step_result",
+                        "run_id": run_id,
+                        "step": step,
+                        "success": ok,
+                        "note": note,
+                        "url": browser.page.url if browser.page else "unknown",
+                        "assertions": verify_payload,
+                        "step_start_ts": step_start_iso,
+                        "step_end_ts": step_end_iso,
+                        "duration_s": duration_s,
+                    },
+                )
+                summary["steps"].append(
+                    {
+                        "id": step.get("id"),
+                        "goal": step.get("goal"),
+                        "success": ok,
+                        "note": note,
+                        "url": browser.page.url if browser.page else "unknown",
+                        "step_start_ts": step_start_iso,
+                        "step_end_ts": step_end_iso,
+                        "duration_s": duration_s,
+                    }
+                )
+                usage = (
+                    StepTokenUsage(
+                        int(llm_usage.get("prompt_tokens") or 0),
+                        int(llm_usage.get("completion_tokens") or 0),
+                        int(llm_usage.get("total_tokens") or 0),
+                    )
+                    if llm_usage
+                    else None
+                )
+                step_stats.append(
+                    {
+                        "step_index": step.get("id"),
+                        "goal": step.get("goal"),
+                        "success": ok,
+                        "duration_ms": int(duration_s * 1000),
+                        "token_usage": usage,
+                    }
+                )
+                if not ok and step.get("required", False):
+                    if replans_used < max_replans:
+                        replans_used += 1
+                        summary["replans_used"] = replans_used
+                        failure_code = str(note or "unknown_failure")
+                        short_note = f"id={step.get('id')} goal={step.get('goal')}"
+                        try:
+                            new_plan, raw_replan_output, replan_mode = extract_replan_with_retry(
+                                planner,
+                                task,
+                                current_plan=plan,
+                                failed_step_id=step.get("id"),
+                                failure_code=failure_code,
+                                short_note=short_note,
+                                max_attempts=2,
+                            )
+                            if (
+                                replan_mode != "patch"
+                                and "search_results_not_verified" in failure_code
+                            ):
+                                new_plan = ensure_minimum_plan(new_plan, SEARCH_QUERY)
+                            steps = new_plan.get("steps", [])
+                            if not steps:
+                                raise RuntimeError("Replan returned no steps")
+                            plan = new_plan
+                            append_jsonl(
+                                feedback_path,
+                                {
+                                    "event": "replan",
+                                    "run_id": run_id,
+                                    "model": planner_model,
+                                    "failure_code": failure_code,
+                                    "note": short_note,
+                                    "raw_output": raw_replan_output,
+                                    "plan": new_plan,
+                                    "mode": replan_mode,
+                                },
+                            )
+                            if replan_mode != "patch":
+                                step_index = 0
+                            continue
+                        except Exception as exc:
+                            all_passed = False
+                            raise RuntimeError(f"Failed to parse replanned JSON: {exc}")
+                    else:
+                        all_passed = False
+                        break
+                if step.get("stop_if_true") and ok:
+                    runtime.assert_done(
+                        any_of(url_contains("signin"), url_contains("/ap/")),
+                        label="checkout_complete",
+                    )
+                    break
+                step_index += 1
+
+            summary["success"] = bool(all_passed)
+            summary["end_ts"] = now_iso()
+            # Metrics
+            durations = [s.get("duration_s", 0) for s in summary["steps"]]
+            steps_passed = sum(1 for s in summary["steps"] if s.get("success"))
+            steps_failed = sum(
+                1 for s in summary["steps"] if s.get("success") is False
+            )
+            summary["metrics"] = {
+                "steps_total": len(summary["steps"]),
+                "steps_passed": steps_passed,
+                "steps_failed": steps_failed,
+                "total_duration_s": round(sum(durations), 3),
+                "avg_step_duration_s": (
+                    round(sum(durations) / len(durations), 3) if durations else 0
+                ),
+                "replans_used": summary["replans_used"],
+            }
+            feedback_dir.mkdir(parents=True, exist_ok=True)
+            summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+            run_ms = int((time.time() - run_start_ts) * 1000)
+            token_summary = {
+                "demo_name": "Planner + Executor Amazon Shopping",
+                "total_prompt_tokens": total_tokens.prompt_tokens,
+                "total_completion_tokens": total_tokens.completion_tokens,
+                "total_tokens": total_tokens.total_tokens,
+                "average_per_scene": (
+                    total_tokens.total_tokens / len(step_stats) if step_stats else 0
+                ),
+                "interactions": [
+                    {
+                        "scene": f"Scene {s['step_index']}: {str(s['goal'])[:40]}",
+                        "prompt_tokens": s["token_usage"].prompt_tokens if s["token_usage"] else 0,
+                        "completion_tokens": s["token_usage"].completion_tokens if s["token_usage"] else 0,
+                        "total": s["token_usage"].total_tokens if s["token_usage"] else 0,
+                    }
+                    for s in step_stats
+                ],
+            }
+            print("\n=== Run Summary ===", flush=True)
+            print(f"run_id: {run_id}", flush=True)
+            print(f"success: {all_passed}", flush=True)
+            print(f"duration_ms: {run_ms}", flush=True)
+            print(f"tokens_total: {total_tokens.total_tokens}", flush=True)
+            print(
+                f"Steps passed: {sum(1 for s in step_stats if s['success'])}/{len(step_stats)}",
+                flush=True,
+            )
+            video_output = screenshots_dir / "demo.mp4"
+            try:
+                create_demo_video(str(screenshots_dir), token_summary, str(video_output))
+                print(f"✅ Video saved: {video_output}", flush=True)
+            except Exception as exc:
+                print(f"  Warning: Failed to generate video: {exc}", flush=True)
+            runtime.finalize_run(success=all_passed)
+            runtime_finalized = True
+            tracer.set_final_status("success" if all_passed else "failure")
+            tracer.emit_run_end(
+                steps=len(steps), status=("success" if all_passed else "failure")
+            )
+            run_end_emitted = True
+            tracer.close(blocking=True)
+    finally:
+        if not run_end_emitted:
+            try:
+                tracer.set_final_status("failure")
+                tracer.emit_run_end(steps=len(steps), status="failure")
+            except Exception:
+                pass
+        if not runtime_finalized and runtime is not None:
+            try:
+                runtime.finalize_run(success=False)
+            except Exception:
+                pass
+        try:
+            tracer.close(blocking=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
