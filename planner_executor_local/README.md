@@ -45,6 +45,20 @@ This scaffold includes:
 - **Summary JSON**: compact summary at `planner_feedback/<run_id>.summary.json`.
 - **Vision fallback (optional)**: set `ENABLE_VISION_FALLBACK=1`.
 
+On Apple Silicon, do following export to use MLX:
+
+```bash
+pip install mlx-vlm
+```
+
+then export:
+```bash
+export PLANNER_PROVIDER=mlx \
+PLANNER_MODEL=mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit \
+EXECUTOR_PROVIDER=hf \
+EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct
+```
+
 ### Vision Fallback (optional)
 
 By default, the executor is text-only. To enable vision fallback:
