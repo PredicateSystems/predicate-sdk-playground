@@ -125,7 +125,7 @@ class LocalHFModel:
         # Build model loading kwargs with MPS-specific optimizations
         load_kwargs = {
             "device_map": device_map,
-            "torch_dtype": torch_dtype,
+            "dtype": torch_dtype,
             "low_cpu_mem_usage": True,  # Better memory management for large models
         }
 
@@ -137,10 +137,21 @@ class LocalHFModel:
             # Note: If you encounter errors, fallback to "eager"
             # load_kwargs["attn_implementation"] = "eager"
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            **load_kwargs
-        )
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                **load_kwargs
+            )
+        except RuntimeError as exc:
+            msg = str(exc)
+            if "Invalid buffer size" in msg and torch.backends.mps.is_available():
+                raise RuntimeError(
+                    "Model allocation failed on MPS (Apple Silicon). "
+                    "This usually means the model is too large for the available memory. "
+                    "Try a smaller HF model (e.g., Qwen/Qwen2.5-3B-Instruct) or use MLX "
+                    "with a 4-bit model (PLANNER_PROVIDER=mlx, EXECUTOR_PROVIDER=mlx)."
+                ) from exc
+            raise
 
     def generate(
         self,
@@ -2569,50 +2580,12 @@ async def main() -> None:
                         + int(llm_usage.get("total_tokens") or 0),
                     )
                 try:
-                    last_snap = getattr(runtime, "_trace_last_snapshot", None)
-                    pre_url = getattr(runtime, "_trace_step_pre_url", None) or ""
-                    post_url = browser.page.url if browser.page else ""
-                    snapshot_digest = None
-                    if last_snap is not None:
-                        snapshot_digest = (
-                            f"sha256:{_compute_hash(f'{pre_url}{last_snap.timestamp}')}"
-                        )
-                        pre_elements = TraceEventBuilder.build_snapshot_event(last_snap).get(
-                            "elements", []
-                        )
-                    else:
-                        pre_elements = None
-                    llm_data = getattr(runtime, "_trace_last_llm", None) or {
-                        "response_text": "",
-                        "response_hash": f"sha256:{_compute_hash('')}",
-                        "usage": {},
-                    }
-                    exec_data = {
-                        "action": str(step.get("action") or "").lower(),
-                        "success": bool(ok),
-                        "note": note,
-                    }
-                    verify_data = {"passed": bool(ok), "signals": {}}
-                    step_end_data = TraceEventBuilder.build_step_end_event(
-                        step_id=getattr(runtime, "step_id", "step-0"),
-                        step_index=getattr(runtime, "step_index", 0),
-                        goal=step.get("goal") or "",
-                        attempt=0,
-                        pre_url=pre_url,
-                        post_url=post_url,
-                        snapshot_digest=snapshot_digest,
-                        llm_data=llm_data,
-                        exec_data=exec_data,
-                        verify_data=verify_data,
-                        pre_elements=pre_elements,
-                        assertions=verify_payload.get("assertions")
-                        if isinstance(verify_payload, dict)
-                        else None,
-                    )
-                    runtime.tracer.emit(
-                        "step_end",
-                        step_end_data,
-                        step_id=getattr(runtime, "step_id", None),
+                    await runtime.emit_step_end(
+                        action=str(step.get("action") or "").lower(),
+                        success=bool(ok),
+                        error=None if ok else str(note or "step_failed"),
+                        outcome=str(note or "ok"),
+                        verify_passed=bool(ok),
                     )
                 except Exception as exc:
                     print(f"  [warn] step_end emit failed: {exc}", flush=True)
