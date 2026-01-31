@@ -23,6 +23,16 @@ Goals:
   - optional “live updates” mode to simulate DOM churn
 - `/forms/onboarding`
   - multi-step form with validation gating each step
+- `/fixtures/stabilize`
+  - delayed hydration + timed DOM updates
+  - optional `?live=1` for continuous DOM churn (should never “stabilize”)
+- `/fixtures/reveal`
+  - delayed hydration + scrollable results container
+  - "Load more results" button appends items after a delay
+  - pagination-like navigation via `?page=2`
+- `/fixtures/blockers`
+  - delayed hydration + deterministic blocker states via `?kind=...`
+  - `?kind=captcha|login|payment|modal`
 
 ## Running
 
