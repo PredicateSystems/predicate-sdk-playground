@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "run_id": "trace",
+  "generated_at": "2026-02-01T02:08:22.252063+00:00",
+  "trace_file": {
+    "path": "/Users/guoliangwang/Code/Sentience/sentience-sdk-playground/langchain-debugging/artifacts/20260131_180744/trace.jsonl",
+    "size_bytes": 6772,
+    "line_count": 10
+  },
+  "summary": {
+    "agent_name": null,
+    "total_steps": 3,
+    "status": "success",
+    "start_time": "2026-02-01T02:08:00.000Z",
+    "end_time": "2026-02-01T02:08:22.000Z",
+    "duration_ms": 22000,
+    "counters": {
+      "snapshot_count": 0,
+      "action_count": 0,
+      "error_count": 0
+    }
+  },
+  "steps": [
+    {
+      "step": 2,
+      "byte_offset": 0,
+      "line_number": 3,
+      "timestamp": "2026-02-01T02:08:00.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": null,
+      "status": "success"
+    },
+    {
+      "step": 3,
+      "byte_offset": 1766,
+      "line_number": 4,
+      "timestamp": "2026-02-01T02:08:03.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": null,
+      "status": "success"
+    },
+    {
+      "step": 4,
+      "byte_offset": 2512,
+      "line_number": 10,
+      "timestamp": "2026-02-01T02:08:15.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": null,
+      "status": "success"
+    }
+  ]
+}

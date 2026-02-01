@@ -1,0 +1,15 @@
+{
+  "demo_name": "langchain-debugging",
+  "total_prompt_tokens": 0,
+  "total_completion_tokens": 0,
+  "total_tokens": 0,
+  "interactions": [
+    {
+      "scene": "scene 2: langchain open homepage",
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total": 0
+    }
+  ],
+  "average_per_scene": 0.0
+}
