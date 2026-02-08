@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "run_id": "trace",
+  "generated_at": "2026-02-01T05:33:52.878853+00:00",
+  "trace_file": {
+    "path": "/Users/guoliangwang/Code/Sentience/sentience-sdk-playground/langchain-debugging/artifacts/20260131_213249/trace.jsonl",
+    "size_bytes": 736926,
+    "line_count": 18
+  },
+  "summary": {
+    "agent_name": "langchain-debugging",
+    "total_steps": 3,
+    "status": "partial",
+    "start_time": "2026-02-01T05:32:52.000Z",
+    "end_time": "2026-02-01T05:33:49.000Z",
+    "duration_ms": 57000,
+    "counters": {
+      "snapshot_count": 3,
+      "action_count": 0,
+      "error_count": 0
+    }
+  },
+  "steps": [
+    {
+      "step": 2,
+      "byte_offset": 0,
+      "line_number": 5,
+      "timestamp": "2026-02-01T05:32:52.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": {
+        "url": "https://www.dw.com/en/top-stories/s-9097",
+        "digest": "sha256:e1c174ee7b905126670ee7c96920da9a50a268a981a0548ed7aa7dbd2479fe9d"
+      },
+      "status": "success"
+    },
+    {
+      "step": 3,
+      "byte_offset": 235485,
+      "line_number": 7,
+      "timestamp": "2026-02-01T05:33:12.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": {
+        "url": "https://www.dw.com/en/top-stories/s-9097",
+        "digest": "sha256:365e1aeb1a2e33b81a2234d7aac055a5818854e7464375577b1060c254ade9d5"
+      },
+      "status": "success"
+    },
+    {
+      "step": 4,
+      "byte_offset": 483397,
+      "line_number": 18,
+      "timestamp": "2026-02-01T05:33:24.000Z",
+      "action": {
+        "type": "",
+        "goal": null,
+        "digest": null
+      },
+      "snapshot": {
+        "url": "https://www.dw.com/en/top-stories/s-9097",
+        "digest": "sha256:0776f4a3ca1fa844c26391b376f44abc816f8a1c0dc9934d13412b0f0c163ccd"
+      },
+      "status": "failure"
+    }
+  ]
+}
