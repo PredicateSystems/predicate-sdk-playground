@@ -39,7 +39,8 @@ if _SHARED.exists():
 
 from sentience import SentienceDebugger
 from sentience.browser import AsyncSentienceBrowser
-from sentience.models import SnapshotOptions
+from sentience.models import ScreenshotConfig, SnapshotOptions
+from sentience.trace_event_builder import TraceEventBuilder
 from sentience.tracer_factory import create_tracer
 from sentience.verification import any_of, custom, exists, url_contains
 
@@ -56,7 +57,7 @@ except ImportError:
 START_URL = "https://www.dw.com"
 TASK_QUESTION = "Visit DW.com and list the headline and publication time of the top news article."
 DEMO_MODE = (os.getenv("DEMO_MODE") or "fix").strip().lower()  # "fail" | "fix"
-DEMO_FAILURE = (os.getenv("DEMO_FAILURE") or "").strip().lower()  # "headline" | "time" | ""
+DEMO_FAILURE = "time"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 HEADLESS = (os.getenv("HEADLESS") or "false").strip().lower() in {"1", "true", "yes"}
 RECORD_VIDEO = (os.getenv("PLAYWRIGHT_RECORD_VIDEO") or "false").strip().lower() in {
@@ -65,6 +66,8 @@ RECORD_VIDEO = (os.getenv("PLAYWRIGHT_RECORD_VIDEO") or "false").strip().lower()
     "yes",
 }
 SENTIENCE_BROWSER_EXECUTABLE_PATH = os.getenv("SENTIENCE_BROWSER_EXECUTABLE_PATH")
+SCREENSHOT_FORMAT = "jpeg"
+SCREENSHOT_QUALITY = int(os.getenv("SCREENSHOT_QUALITY", "60"))
 
 
 def _load_env_file(path: Path, *, override: bool = False) -> None:
@@ -182,6 +185,35 @@ async def _dismiss_dw_modal(page) -> None:
         return
 
 
+def _emit_snapshot_trace(tracer, snapshot, step_id: str | None, step_index: int | None) -> None:
+    """
+    Emit a snapshot trace event with screenshot payload for Studio.
+    """
+    if tracer is None or snapshot is None:
+        return
+    try:
+        data = TraceEventBuilder.build_snapshot_event(snapshot, step_index=step_index)
+        screenshot_raw = getattr(snapshot, "screenshot", None)
+        if screenshot_raw:
+            # Extract base64 string from data URL if needed
+            # Format: "data:image/jpeg;base64,{base64_string}"
+            if screenshot_raw.startswith("data:image"):
+                screenshot_base64 = (
+                    screenshot_raw.split(",", 1)[1]
+                    if "," in screenshot_raw
+                    else screenshot_raw
+                )
+            else:
+                screenshot_base64 = screenshot_raw
+            data["screenshot_base64"] = screenshot_base64
+            data["screenshot_format"] = SCREENSHOT_FORMAT
+        else:
+            print("[warn] snapshot has no screenshot_base64", flush=True)
+        tracer.emit("snapshot", data=data, step_id=step_id)
+    except Exception:
+        return
+
+
 async def main() -> None:
     # Load env vars from the playground .env (so SENTIENCE_API_KEY is picked up).
     _load_env_file(_REPO_ROOT / "sentience-sdk-playground" / ".env", override=False)
@@ -204,11 +236,22 @@ async def main() -> None:
 
     run_label = f"langchain-debug-{timestamp}"
     run_id = str(uuid.uuid4())
+    class _TraceLogger:
+        def info(self, message: str) -> None:
+            print(f"[trace] {message}", flush=True)
+
+        def warning(self, message: str) -> None:
+            print(f"[trace][warn] {message}", flush=True)
+
+        def error(self, message: str) -> None:
+            print(f"[trace][error] {message}", flush=True)
+
     tracer = create_tracer(
         api_key=sentience_api_key,
         run_id=run_id,
-        upload_trace=False,
-        goal=f"[demo] {run_label} | DW.com: top news headline + time",
+        upload_trace=True,
+        goal=TASK_QUESTION,
+        logger=_TraceLogger(),
         agent_type="sdk-playground/langchain-debugging",
         llm_model=OPENAI_MODEL,
         start_url=START_URL,
@@ -217,6 +260,21 @@ async def main() -> None:
     print(f"[demo] run_label={run_label}")
     print(f"[demo] run_id={run_id} (UUID; used by Sentience Studio)")
     print(f"[demo] DEMO_MODE={DEMO_MODE!r} (set DEMO_MODE=fail to force a failing trace)")
+    try:
+        tracer.emit_run_start(
+            agent="langchain-debugging",
+            llm_model=OPENAI_MODEL,
+            config={
+                "goal": TASK_QUESTION,
+                "run_label": run_label,
+                "demo_failure": DEMO_FAILURE,
+                "capture_screenshots": True,
+                "screenshot_format": "jpeg",
+                "screenshot_quality": 80,
+            },
+        )
+    except Exception as e:
+        print(f"[warn] tracer emit_run_start failed: {e}")
 
     token_tracker = TokenTracker("langchain-debugging")
 
@@ -294,7 +352,12 @@ async def main() -> None:
     dbg = SentienceDebugger.attach(
         page=page,
         tracer=tracer,
-        snapshot_options=SnapshotOptions(use_api=True, show_overlay=True, limit=50),
+        snapshot_options=SnapshotOptions(
+            use_api=True,
+            show_overlay=True,
+            limit=50,
+            screenshot=ScreenshotConfig(format=SCREENSHOT_FORMAT, quality=SCREENSHOT_QUALITY),
+        ),
         sentience_api_key=sentience_api_key,
     )
 
@@ -305,7 +368,21 @@ async def main() -> None:
             # -------------------------
             async with dbg.step("Verify landing", step_index=0):
                 await _dismiss_dw_modal(page)
-                await dbg.snapshot(goal="verify:landing", use_api=True, limit=60, show_overlay=True)
+                landing_snap = await dbg.snapshot(
+                    goal="verify:landing",
+                    use_api=True,
+                    limit=60,
+                    show_overlay=True,
+                    screenshot=ScreenshotConfig(format=SCREENSHOT_FORMAT, quality=SCREENSHOT_QUALITY),
+                )
+                if getattr(landing_snap, "screenshot", None):
+                    print(f"[demo] landing screenshot bytes={len(landing_snap.screenshot)}", flush=True)
+                _emit_snapshot_trace(
+                    tracer,
+                    landing_snap,
+                    getattr(dbg.runtime, "step_id", None),
+                    getattr(dbg.runtime, "step_index", None),
+                )
                 await dbg.check(url_contains("dw.com"), label="on_dw", required=True).eventually(
                     timeout_s=10
                 )
@@ -365,7 +442,19 @@ async def main() -> None:
 
             # Verify homepage
             snap = await dbg.snapshot(
-                goal="verify:dw_homepage", use_api=True, limit=80, show_overlay=True
+                goal="verify:dw_homepage",
+                use_api=True,
+                limit=80,
+                show_overlay=True,
+                screenshot=ScreenshotConfig(format=SCREENSHOT_FORMAT, quality=SCREENSHOT_QUALITY),
+            )
+            if getattr(snap, "screenshot", None):
+                print(f"[demo] homepage screenshot bytes={len(snap.screenshot)}", flush=True)
+            _emit_snapshot_trace(
+                tracer,
+                snap,
+                getattr(dbg.runtime, "step_id", None),
+                getattr(dbg.runtime, "step_index", None),
             )
             await dbg.check(
                 any_of(
@@ -407,6 +496,22 @@ async def main() -> None:
                         label="headline_signal_present",
                         required=True,
                     ).eventually(timeout_s=8)
+
+                extract_snap = await dbg.snapshot(
+                    goal="verify:extract",
+                    use_api=True,
+                    limit=80,
+                    show_overlay=True,
+                    screenshot=ScreenshotConfig(format=SCREENSHOT_FORMAT, quality=SCREENSHOT_QUALITY),
+                )
+                if getattr(extract_snap, "screenshot", None):
+                    print(f"[demo] extract screenshot bytes={len(extract_snap.screenshot)}", flush=True)
+                _emit_snapshot_trace(
+                    tracer,
+                    extract_snap,
+                    getattr(dbg.runtime, "step_id", None),
+                    getattr(dbg.runtime, "step_index", None),
+                )
 
                 extracted = await page.evaluate(
                     """() => {
@@ -482,10 +587,20 @@ async def main() -> None:
                     expected_time = (expected.get("timeText") or "").strip()
 
                 extracted_headline, extracted_time = _parse_extraction(extracted)
+                if not expected_headline:
+                    expected_headline = extracted_headline
+                if not expected_time:
+                    expected_time = "HARD_CODED_EXPECTED_TIME"
                 if DEMO_FAILURE == "headline":
                     extracted_headline = "Homepage"
                 if DEMO_FAILURE == "time":
                     extracted_time = ""
+                extracted = "\n".join(
+                    [
+                        f"Headline: {extracted_headline}" if extracted_headline else "",
+                        f"Time: {extracted_time}" if extracted_time else "",
+                    ]
+                ).strip()
 
                 await dbg.check(
                     custom(
@@ -559,6 +674,9 @@ async def main() -> None:
                     "question": TASK_QUESTION,
                     "answer_paragraph": extracted,
                     "url": page.url,
+                    "demo_failure": DEMO_FAILURE or None,
+                    "expected_headline": expected_headline,
+                    "expected_time": expected_time,
                 }
                 (base_dir / "extraction.json").write_text(
                     json.dumps(out, indent=2), encoding="utf-8"
