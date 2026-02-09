@@ -60,3 +60,10 @@ planner_executor_local/planner_feedback/
 planner_executor_local/executor.log
 planner_executor_local/.sentience
 traces/
+
+# LangChain / LangGraph demos (generated at runtime)
+langchain-debugging/artifacts/
+browser-use-debugging/artifacts/
+
+# Extra safety: never commit browser profiles/caches
+**/profile/
