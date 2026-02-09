@@ -28,3 +28,4 @@ huggingface_hub>=1.3.2
 # LangChain demo (langchain-debugging)
 langchain
 langchain-openai
+langgraph

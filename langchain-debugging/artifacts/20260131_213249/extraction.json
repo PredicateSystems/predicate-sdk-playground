@@ -1,8 +1,0 @@
-{
-  "question": "Visit DW.com and list the headline and publication time of the top news article.",
-  "answer_paragraph": "Headline: Iran hints at progress toward negotiations with US",
-  "url": "https://www.dw.com/en/top-stories/s-9097",
-  "demo_failure": "time",
-  "expected_headline": "Iran hints at progress toward negotiations with US",
-  "expected_time": "HARD_CODED_EXPECTED_TIME"
-}
