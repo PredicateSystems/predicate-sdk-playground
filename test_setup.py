@@ -13,7 +13,7 @@ if not os.path.exists(env_path):
     print(f"❌ .env file not found at: {env_path}")
     print("\nPlease create a .env file with:")
     print("OPENAI_API_KEY=your_key_here")
-    print("SENTIENCE_API_KEY=your_key_here  # Optional")
+    print("PREDICATE_API_KEY=your_key_here  # Optional")
     sys.exit(1)
 else:
     print(f"✅ .env file found")
@@ -23,7 +23,7 @@ load_dotenv(env_path)
 
 # Check API keys
 openai_key = os.getenv('OPENAI_API_KEY')
-sentience_key = os.getenv('SENTIENCE_API_KEY')
+sentience_key = os.getenv('PREDICATE_API_KEY')
 
 if not openai_key:
     print("❌ OPENAI_API_KEY not set in .env file")
@@ -32,9 +32,9 @@ else:
     print(f"✅ OPENAI_API_KEY found (length: {len(openai_key)})")
 
 if sentience_key:
-    print(f"✅ SENTIENCE_API_KEY found (length: {len(sentience_key)})")
+    print(f"✅ PREDICATE_API_KEY found (length: {len(sentience_key)})")
 else:
-    print("⚠️  SENTIENCE_API_KEY not set (Demo 1 will use free tier)")
+    print("⚠️  PREDICATE_API_KEY not set (Demo 1 will use free tier)")
 
 # Check imports
 print("\nChecking Python packages...")
@@ -55,7 +55,7 @@ except ImportError:
 
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    from sentience import SentienceBrowser, snapshot
+    from predicate import PredicateBrowser, snapshot
     print("✅ sentience SDK importable")
 except ImportError as e:
     print(f"❌ sentience SDK not importable: {e}")

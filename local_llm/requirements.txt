@@ -1,5 +1,5 @@
 # Core dependencies
-sentience-python
+predicatelabs
 python-dotenv
 
 # LLM dependencies

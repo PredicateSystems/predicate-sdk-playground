@@ -77,7 +77,7 @@ def test_dependencies():
     print("\nTesting dependencies...")
 
     dependencies = [
-        ("sentience", "Sentience SDK"),
+        ("sentience", "Predicate SDK"),
         ("transformers", "Hugging Face Transformers"),
         ("torch", "PyTorch"),
         ("openai", "OpenAI"),

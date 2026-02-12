@@ -1,18 +1,18 @@
 ## Demo 1 Voiceover Script (TTS-friendly)
 
-**Video:** browser-use + SentienceDebugger (sidecar verification)  
+**Video:** browser-use + PredicateDebugger (sidecar verification)  
 **Recording modes:** `DEMO_MODE=fail` then `DEMO_MODE=fix`  
 
 ### Scene 0 — Hook (10–15s)
 Browser agents do not usually crash.  
 They drift into the wrong state.  
-In this demo, I will attach SentienceDebugger to a browser-use agent.  
-Then I will show a failure in Sentience Studio, and fix it with deterministic verification.
+In this demo, I will attach PredicateDebugger to a browser-use agent.  
+Then I will show a failure in Predicate Studio, and fix it with deterministic verification.
 
-### Scene 1 — What SentienceDebugger is (15–25s)
-SentienceDebugger is a verifier-only sidecar.  
+### Scene 1 — What PredicateDebugger is (15–25s)
+PredicateDebugger is a verifier-only sidecar.  
 Your agent still plans and executes actions.  
-SentienceDebugger takes snapshots, runs assertions, and uploads a trace you can inspect in Sentience Studio.
+PredicateDebugger takes snapshots, runs assertions, and uploads a trace you can inspect in Predicate Studio.
 
 ### Scene 2 — Run the agent with a failing verification (20–35s)
 First, I run the agent in fail mode.  
@@ -23,8 +23,8 @@ Key idea: the vision-based agent can finish and still be wrong.
 Sentience does not trust completion.  
 Sentience requires proof.
 
-### Scene 3 — Open the trace in Sentience Studio (45–75s)
-Now I open the run in Sentience Studio using the run_id.  
+### Scene 3 — Open the trace in Predicate Studio (45–75s)
+Now I open the run in Predicate Studio using the run_id.  
 I can see each step, the recorded actions, the snapshot state, and the verification results.  
 Instead of guessing, I can prove why the step failed.
 

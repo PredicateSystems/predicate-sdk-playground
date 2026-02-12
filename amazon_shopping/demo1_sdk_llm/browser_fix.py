@@ -5,21 +5,21 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from sentience.browser import SentienceBrowser
+from predicate import PredicateBrowser
 import tempfile
 import shutil
 import time
 from playwright.sync_api import sync_playwright
 
 # Monkey-patch the start method to remove --no-sandbox on macOS
-original_start = SentienceBrowser.start
+original_start = PredicateBrowser.start
 
 def patched_start(self):
     """Patched start method that removes --no-sandbox flag on macOS"""
     import platform
 
     # Find extension directory
-    package_ext_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'sentience', 'extension')
+    package_ext_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'predicate', 'extension')
     dev_ext_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', 'sentience-chrome', 'dist')
 
     if os.path.exists(package_ext_path):
@@ -30,7 +30,7 @@ def patched_start(self):
         raise FileNotFoundError("Extension not found")
 
     # Create temporary extension bundle
-    self._extension_path = tempfile.mkdtemp(prefix="sentience-ext-")
+    self._extension_path = tempfile.mkdtemp(prefix="predicate-ext-")
     shutil.copytree(extension_source, self._extension_path, dirs_exist_ok=True)
 
     self.playwright = sync_playwright().start()
@@ -66,4 +66,4 @@ def patched_start(self):
     time.sleep(0.5)
 
 # Apply the patch
-SentienceBrowser.start = patched_start
+PredicateBrowser.start = patched_start

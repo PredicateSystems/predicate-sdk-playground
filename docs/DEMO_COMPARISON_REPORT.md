@@ -5,7 +5,7 @@
 ## The Showdown
 
 We ran two demos to see which approach works better for LLM-powered web automation:
-- **Demo 1**: Sentience SDK (structured JSON) + GPT-4 Turbo
+- **Demo 1**: Predicate SDK (structured JSON) + GPT-4 Turbo
 - **Demo 2**: GPT-4o Vision (raw screenshots) + Playwright
 
 **Spoiler**: Demo 2 failed spectacularly. Three times.
@@ -167,14 +167,14 @@ We ran two demos to see which approach works better for LLM-powered web automati
 
 This wasn't a fair fight. It was a massacre.
 
-**Sentience SDK + LLM**: 100% success, 19,956 tokens, clean execution
+**Predicate SDK + LLM**: 100% success, 19,956 tokens, clean execution
 **Vision + LLM**: 0% success, never finished, complete failure
 
 The experiment validates what we suspected: **for web automation, structured semantic data beats vision models every single time.**
 
-Vision models might work for OCR or image understanding tasks, but for web automation? They're not even in the same league as purpose-built tools like the Sentience SDK.
+Vision models might work for OCR or image understanding tasks, but for web automation? They're not even in the same league as purpose-built tools like the Predicate SDK.
 
-**Winner**: Sentience SDK 🏆
+**Winner**: Predicate SDK 🏆
 **MVP**: Element filtering optimization (43% token savings)
 **Biggest Disappointment**: GPT-4o Vision (0/3 success rate)
 

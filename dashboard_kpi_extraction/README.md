@@ -57,8 +57,8 @@ python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Install Sentience SDK
-pip install sentienceapi
+# Install Predicate SDK
+pip install predicatelabs
 
 # Install Playwright browsers
 playwright install chromium
@@ -78,8 +78,8 @@ Create a `.env` file or export these variables:
 
 ```bash
 # Optional but recommended: enables Gateway refinement + cloud trace upload
-# Get your free API key at https://www.sentienceapi.com
-export SENTIENCE_API_KEY="sk_..."
+# Get your free API key at https://predicatelabs.dev
+export PREDICATE_API_KEY="sk_..."
 
 # Local text model (default: Qwen/Qwen2.5-3B-Instruct)
 export LOCAL_TEXT_MODEL="Qwen/Qwen2.5-3B-Instruct"
