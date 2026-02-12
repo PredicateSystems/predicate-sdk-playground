@@ -13,7 +13,7 @@ playground_dir = os.path.dirname(local_llm_dir)
 sys.path.insert(0, local_llm_dir)
 sys.path.insert(0, playground_dir)
 
-from sentience import SentienceBrowser, snapshot, click_rect
+from predicate import PredicateBrowser, snapshot, click_rect
 from models.local_llm import LocalLLM
 from models.cloud_llm import CloudLLM
 from shared.web_agent import WebAgent
@@ -84,7 +84,7 @@ def run_google_search_demo(
     }
 
     try:
-        with SentienceBrowser(headless=False) as browser:
+        with PredicateBrowser(headless=False) as browser:
             # ============================================================
             # SCENE 1: Navigate to Google & Find Search Box
             # ============================================================

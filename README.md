@@ -1,4 +1,4 @@
-# 🤖 Sentience SDK Playground
+# 🤖 Predicate SDK Playground
 
 **Reproducible demos showing how structure-first browser agents outperform vision-only agents.**
 
@@ -115,7 +115,7 @@ High-noise, JS-heavy, real production site.
 
 ## 📊 Key Results (Across All Demos)
 
-| Metric             | Vision-Only | Sentience SDK     |
+| Metric             | Vision-Only | Predicate SDK     |
 | ------------------ | ----------- | ----------------- |
 | Task success       | ❌ 0–30%     | ✅ 100%            |
 | Avg tokens / step  | ~3,000+     | ~1,500            |
@@ -128,7 +128,7 @@ High-noise, JS-heavy, real production site.
 ## 🧠 Why This Works
 
 **Vision agents** reason from pixels.
-**Sentience agents** reason from *structure*.
+**Predicate agents** reason from *structure*.
 
 Snapshots provide:
 
@@ -155,13 +155,32 @@ See `docs/DEMO_REPORTS.md` for full metrics and results.
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/SentienceAPI/sentience-sdk-playground
+git clone https://github.com/PredicateLabs/sentience-sdk-playground
 cd sentience-sdk-playground
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-pip install sentienceapi
+pip install predicatelabs
 playwright install chromium
 ```
+
+### SDK-Python Rename Note (2026-02-10)
+
+- The Python package name changed from `sentienceapi` to `predicatelabs` on **2026-02-10**.
+- Use `pip install predicatelabs` for all new setups.
+- Canonical imports are now from `predicate` (for example `from predicate import PredicateBrowser, AsyncPredicateBrowser, PredicateDebugger`).
+- Canonical API key env var and parameter names are `PREDICATE_API_KEY` and `predicate_api_key`.
+
+If you see runtime/import errors in older examples, there may still be a few stale references. Common examples:
+
+- old: `from sentience ...`
+- old: `from predicate.browser import AsyncPredicateBrowser`
+- old: `sentience_api_key=...` or `SENTIENCE_API_KEY`
+
+Use these instead:
+
+- new: `from predicate import AsyncPredicateBrowser, PredicateBrowser, PredicateDebugger`
+- new: `predicate_api_key=...`
+- new: `PREDICATE_API_KEY`
 
 Run a demo:
 
@@ -188,11 +207,11 @@ docs/                           # Reports, plans, comparisons
 
 ## 🔗 Learn More
 
-* Sentience SDK (Python): [https://github.com/SentienceAPI/sentience-python](https://github.com/SentienceAPI/sentience-python)
-* Sentience SDK (TS): [https://github.com/SentienceAPI/sentience-ts](https://github.com/SentienceAPI/sentience-ts)
+* Predicate SDK (Python): [https://github.com/PredicateLabs/predicatelabs](https://github.com/PredicateLabs/predicatelabs)
+* Predicate SDK (TS): [https://github.com/PredicateLabs/sentience-ts](https://github.com/PredicateLabs/sentience-ts)
 * Demo Site: [https://sentience-sdk-playground.vercel.app](https://sentience-sdk-playground.vercel.app)
-* Docs: [https://www.sentienceapi.com/docs](https://www.sentienceapi.com/docs)
-* Issues: [https://github.com/SentienceAPI/sentience-sdk-playground/issues](https://github.com/SentienceAPI/sentience-sdk-playground/issues)
+* Docs: [https://predicatelabs.dev/docs](https://predicatelabs.dev/docs)
+* Issues: [https://github.com/PredicateLabs/sentience-sdk-playground/issues](https://github.com/PredicateLabs/sentience-sdk-playground/issues)
 
 ---
 

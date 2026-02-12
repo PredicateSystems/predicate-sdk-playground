@@ -1,10 +1,10 @@
-# Amazon Best Sellers Shopping Guide - Sentience Python SDK
+# Amazon Best Sellers Shopping Guide - Predicate Python SDK
 
-This guide demonstrates how to use the Sentience Python SDK to automate shopping on Amazon.
+This guide demonstrates how to use the Predicate Python SDK to automate shopping on Amazon.
 
 ## Prerequisites
-* install the `sentience-python` sdk:
-`pip install sentience-python`
+* install the `predicatelabs` sdk:
+`pip install predicatelabs`
 
 * install playwright with chromium support:
 ```bash
@@ -21,8 +21,8 @@ Amazon Best Sellers Shopping Bot
 Navigate to Amazon, select a product, and add to cart
 """
 
-from sentience import (
-    SentienceBrowser,
+from predicate import (
+    PredicateBrowser,
     snapshot,
     find,
     click,
@@ -43,7 +43,7 @@ def save_screenshot(data_url: str, filename: str):
 
 def main():
     # Initialize browser with custom viewport
-    with SentienceBrowser(headless=False) as browser:
+    with PredicateBrowser(headless=False) as browser:
         print("Step 1: Navigating to Amazon Best Sellers...")
 
         # Navigate to Amazon Best Sellers page
@@ -194,7 +194,7 @@ if __name__ == "__main__":
 
 ```python
 # Default viewport is 1280x800 (set in browser.py:117)
-with SentienceBrowser(headless=False) as browser:
+with PredicateBrowser(headless=False) as browser:
     # Browser starts with viewport 1280x800
     pass
 ```
@@ -211,11 +211,11 @@ self.context = self.playwright.chromium.launch_persistent_context(
 )
 ```
 
-To customize the viewport, you would need to modify the `SentienceBrowser` class to accept viewport parameters:
+To customize the viewport, you would need to modify the `PredicateBrowser` class to accept viewport parameters:
 
 ```python
 # Proposed modification (not yet implemented):
-class SentienceBrowser:
+class PredicateBrowser:
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -439,7 +439,7 @@ There are multiple ways to find elements:
 #### Method 1: Using Query DSL
 
 ```python
-from sentience import find
+from predicate import find
 
 # Find by role and text
 product = find(snap, "role=link text~'Product Name'")
@@ -503,7 +503,7 @@ if add_to_cart:
 
 ## Query Selector Reference
 
-The Sentience SDK uses a powerful query DSL. Here are the key operators:
+The Predicate SDK uses a powerful query DSL. Here are the key operators:
 
 ### Basic Filters
 
@@ -561,7 +561,7 @@ find(snap, "z_index>=100")
 
 ### Core Functions
 
-- `SentienceBrowser(headless=False)` - Launch browser with extension
+- `PredicateBrowser(headless=False)` - Launch browser with extension
 - `browser.goto(url)` - Navigate to URL
 - `snapshot(browser, screenshot=True)` - Capture page state
 - `screenshot(browser, format="png")` - Standalone screenshot
@@ -625,11 +625,11 @@ element.z_index         # Stacking order
 
 Currently, the default viewport is **1280x800** pixels, set in [browser.py:117](../sdk-python/sentience/browser.py#L117).
 
-To use a custom viewport size, you would need to modify the `SentienceBrowser` class:
+To use a custom viewport size, you would need to modify the `PredicateBrowser` class:
 
 ```python
 # Current implementation (simplified)
-class SentienceBrowser:
+class PredicateBrowser:
     def start(self):
         self.context = self.playwright.chromium.launch_persistent_context(
             viewport={"width": 1280, "height": 800},  # Fixed size
@@ -637,7 +637,7 @@ class SentienceBrowser:
         )
 
 # Proposed enhancement (not yet implemented)
-class SentienceBrowser:
+class PredicateBrowser:
     def __init__(self, viewport_width=1280, viewport_height=800):
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
@@ -652,7 +652,7 @@ class SentienceBrowser:
 **Workaround:** You can resize the viewport after launch using Playwright's API:
 
 ```python
-with SentienceBrowser(headless=False) as browser:
+with PredicateBrowser(headless=False) as browser:
     # Set custom viewport size
     browser.page.set_viewport_size({"width": 1920, "height": 1080})
 

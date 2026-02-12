@@ -88,7 +88,7 @@ This installs:
 - `torch` - Deep learning
 - `accelerate` - GPU acceleration
 - `bitsandbytes` - Memory optimization
-- `sentience-python` - SDK
+- `predicatelabs` - SDK
 - `openai` - For comparison (optional)
 
 ### Step 3: Verify Setup
@@ -198,14 +198,14 @@ print('✅ Done!')
 ```python
 from models.local_llm import LocalLLM
 from shared.web_agent import WebAgent
-from sentience import SentienceBrowser, snapshot, click_rect
+from predicate import PredicateBrowser, snapshot, click_rect
 
 # Initialize
 llm = LocalLLM(model_name="Qwen/Qwen2.5-3B-Instruct")
 agent = WebAgent(llm=llm, max_elements=15)
 
 # Use it
-with SentienceBrowser(headless=False) as browser:
+with PredicateBrowser(headless=False) as browser:
     browser.goto("https://www.google.com")
 
     # Find search box

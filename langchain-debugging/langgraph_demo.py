@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LangGraph + Playwright + SentienceDebugger demo (verification sidecar).
+LangGraph + Playwright + PredicateDebugger demo (verification sidecar).
 
 READ task (WebBench 425, from webbench/docs/tasks.md line 134):
 - On encyclopedia.com, search for "Artificial Intelligence"
@@ -46,11 +46,10 @@ _SHARED = Path(__file__).resolve().parents[1] / "browser-use-debugging" / "share
 if _SHARED.exists():
     sys.path.insert(0, str(_SHARED))
 
-from sentience import SentienceDebugger
-from sentience.browser import AsyncSentienceBrowser
-from sentience.models import ScreenshotConfig, SnapshotOptions
-from sentience.tracer_factory import create_tracer
-from sentience.verification import custom, exists, url_contains
+from predicate import AsyncPredicateBrowser, PredicateDebugger
+from predicate.models import ScreenshotConfig, SnapshotOptions
+from predicate.tracer_factory import create_tracer
+from predicate.verification import custom, exists, url_contains
 
 from token_tracker import TokenTracker  # type: ignore
 from playwright_video import try_persist_page_video  # type: ignore
@@ -120,11 +119,11 @@ async def _screenshot(page, path: Path) -> None:
         print(f"[warn] screenshot failed: {e}", flush=True)
 
 
-async def _wait_for_sentience(page, timeout_ms: int = 30000) -> None:
+async def _wait_for_predicate(page, timeout_ms: int = 30000) -> None:
     try:
         await page.wait_for_function("() => window.sentience && window.sentience.snapshot", timeout=timeout_ms)
     except Exception as e:
-        print(f"[warn] sentience injection check failed: {e}", flush=True)
+        print(f"[warn] predicate injection check failed: {e}", flush=True)
 
 
 async def _dismiss_modals_best_effort(page) -> None:
@@ -194,7 +193,7 @@ class StepResult:
 
 
 async def main() -> None:
-    # Load env vars from the playground .env (so SENTIENCE_API_KEY is picked up).
+    # Load env vars from the playground .env (so PREDICATE_API_KEY is picked up).
     _load_env_file(_REPO_ROOT / "sentience-sdk-playground" / ".env", override=False)
     load_dotenv(dotenv_path=str(_REPO_ROOT / "sentience-sdk-playground" / ".env"), override=False)
     _load_env_file(Path.cwd() / ".env", override=False)
@@ -207,9 +206,9 @@ async def main() -> None:
     HEADLESS = (os.getenv("HEADLESS") or "false").strip().lower() in {"1", "true", "yes"}
     RECORD_VIDEO = (os.getenv("PLAYWRIGHT_RECORD_VIDEO") or "false").strip().lower() in {"1", "true", "yes"}
 
-    sentience_api_key = os.getenv("SENTIENCE_API_KEY")
-    if not sentience_api_key:
-        raise SystemExit("Missing SENTIENCE_API_KEY in environment.")
+    predicate_api_key = os.getenv("PREDICATE_API_KEY")
+    if not predicate_api_key:
+        raise SystemExit("Missing PREDICATE_API_KEY in environment.")
     if not os.getenv("OPENAI_API_KEY"):
         raise SystemExit("Missing OPENAI_API_KEY in environment.")
 
@@ -249,7 +248,7 @@ async def main() -> None:
             print(f"[trace][error] {message}", flush=True)
 
     tracer = create_tracer(
-        api_key=sentience_api_key,
+        api_key=predicate_api_key,
         run_id=run_id,
         upload_trace=True,
         goal=TASK,
@@ -260,14 +259,14 @@ async def main() -> None:
     )
 
     print(f"[demo] run_label={run_label}")
-    print(f"[demo] run_id={run_id} (UUID; used by Sentience Studio)")
+    print(f"[demo] run_id={run_id} (UUID; used by Predicate Studio)")
     print(f"[demo] DEMO_MODE={DEMO_MODE!r} (fail to force a failing trace)")
     print(f"[demo] OPENAI_MODEL={OPENAI_MODEL!r}")
 
     token_tracker = TokenTracker("langgraph-demo")
 
-    browser = AsyncSentienceBrowser(
-        api_key=sentience_api_key,
+    browser = AsyncPredicateBrowser(
+        api_key=predicate_api_key,
         headless=HEADLESS,
         user_data_dir=str(base_dir / "profile"),
         record_video_dir=str(video_dir) if RECORD_VIDEO else None,
@@ -278,11 +277,11 @@ async def main() -> None:
     await browser.goto(START_URL)
     page = browser.page
     if page is None:
-        raise RuntimeError("SentienceBrowser did not create a page.")
+        raise RuntimeError("PredicateBrowser did not create a page.")
     await _dismiss_modals_best_effort(page)
-    await _wait_for_sentience(page, timeout_ms=30000)
+    await _wait_for_predicate(page, timeout_ms=30000)
 
-    dbg = SentienceDebugger.attach(
+    dbg = PredicateDebugger.attach(
         page=page,
         tracer=tracer,
         snapshot_options=SnapshotOptions(
@@ -291,7 +290,7 @@ async def main() -> None:
             limit=120,
             screenshot=ScreenshotConfig(format=SCREENSHOT_FORMAT, quality=SCREENSHOT_QUALITY),
         ),
-        sentience_api_key=sentience_api_key,
+        predicate_api_key=predicate_api_key,
     )
 
     # ---- LangGraph model + schema ----
@@ -527,7 +526,7 @@ async def main() -> None:
 
             await asyncio.sleep(1.0)
             await _dismiss_modals_best_effort(page)
-            await await_with_timeout("_wait_for_sentience", _wait_for_sentience(page, timeout_ms=30000), timeout_s=35)
+            await await_with_timeout("_wait_for_predicate", _wait_for_predicate(page, timeout_ms=30000), timeout_s=35)
             updates["post_url"] = page.url
             try:
                 print(f"[demo] act: last_action={updates.get('last_action')} url={updates.get('prev_url')} -> {updates.get('post_url')}", flush=True)

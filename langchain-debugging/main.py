@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-LangChain + Playwright + SentienceDebugger demo (verification sidecar).
+LangChain + Playwright + PredicateDebugger demo (verification sidecar).
 
 This demo shows how to:
 - Use a LangChain agent to drive a Playwright browser
-- Attach SentienceDebugger to the Playwright page
+- Attach PredicateDebugger to the Playwright page
 - Produce consistent screenshots + optional video artifacts
 """
 
@@ -37,12 +37,11 @@ _SHARED = Path(__file__).resolve().parents[1] / "browser-use-debugging" / "share
 if _SHARED.exists():
     sys.path.insert(0, str(_SHARED))
 
-from sentience import SentienceDebugger
-from sentience.browser import AsyncSentienceBrowser
-from sentience.models import ScreenshotConfig, SnapshotOptions
-from sentience.trace_event_builder import TraceEventBuilder
-from sentience.tracer_factory import create_tracer
-from sentience.verification import any_of, custom, exists, url_contains
+from predicate import AsyncPredicateBrowser, PredicateDebugger
+from predicate.models import ScreenshotConfig, SnapshotOptions
+from predicate.trace_event_builder import TraceEventBuilder
+from predicate.tracer_factory import create_tracer
+from predicate.verification import any_of, custom, exists, url_contains
 
 from bbox_visualizer import visualize_api_elements
 from playwright_video import try_persist_page_video
@@ -65,7 +64,7 @@ RECORD_VIDEO = (os.getenv("PLAYWRIGHT_RECORD_VIDEO") or "false").strip().lower()
     "true",
     "yes",
 }
-SENTIENCE_BROWSER_EXECUTABLE_PATH = os.getenv("SENTIENCE_BROWSER_EXECUTABLE_PATH")
+PREDICATE_BROWSER_EXECUTABLE_PATH = os.getenv("PREDICATE_BROWSER_EXECUTABLE_PATH") or os.getenv("SENTIENCE_BROWSER_EXECUTABLE_PATH")
 SCREENSHOT_FORMAT = "jpeg"
 SCREENSHOT_QUALITY = int(os.getenv("SCREENSHOT_QUALITY", "60"))
 
@@ -151,13 +150,13 @@ async def _screenshot(page, path: Path) -> None:
         print(f"[warn] screenshot failed: {e}")
 
 
-async def _wait_for_sentience(page, timeout_ms: int = 30000) -> None:
+async def _wait_for_predicate(page, timeout_ms: int = 30000) -> None:
     try:
         await page.wait_for_function(
             "() => window.sentience && window.sentience.snapshot", timeout=timeout_ms
         )
     except Exception as e:
-        print(f"[warn] sentience injection check failed: {e}")
+        print(f"[warn] predicate injection check failed: {e}")
 
 
 async def _dismiss_dw_modal(page) -> None:
@@ -215,15 +214,15 @@ def _emit_snapshot_trace(tracer, snapshot, step_id: str | None, step_index: int 
 
 
 async def main() -> None:
-    # Load env vars from the playground .env (so SENTIENCE_API_KEY is picked up).
+    # Load env vars from the playground .env (so PREDICATE_API_KEY is picked up).
     _load_env_file(_REPO_ROOT / "sentience-sdk-playground" / ".env", override=False)
     load_dotenv(dotenv_path=str(_REPO_ROOT / "sentience-sdk-playground" / ".env"), override=False)
     _load_env_file(Path.cwd() / ".env", override=False)
     load_dotenv(override=False)
 
-    sentience_api_key = os.getenv("SENTIENCE_API_KEY")
-    if not sentience_api_key:
-        raise SystemExit("Missing SENTIENCE_API_KEY in environment.")
+    predicate_api_key = os.getenv("PREDICATE_API_KEY")
+    if not predicate_api_key:
+        raise SystemExit("Missing PREDICATE_API_KEY in environment.")
     if not os.getenv("OPENAI_API_KEY"):
         raise SystemExit("Missing OPENAI_API_KEY in environment.")
 
@@ -247,7 +246,7 @@ async def main() -> None:
             print(f"[trace][error] {message}", flush=True)
 
     tracer = create_tracer(
-        api_key=sentience_api_key,
+        api_key=predicate_api_key,
         run_id=run_id,
         upload_trace=True,
         goal=TASK_QUESTION,
@@ -258,7 +257,7 @@ async def main() -> None:
     )
 
     print(f"[demo] run_label={run_label}")
-    print(f"[demo] run_id={run_id} (UUID; used by Sentience Studio)")
+    print(f"[demo] run_id={run_id} (UUID; used by Predicate Studio)")
     print(f"[demo] DEMO_MODE={DEMO_MODE!r} (set DEMO_MODE=fail to force a failing trace)")
     try:
         tracer.emit_run_start(
@@ -331,13 +330,13 @@ async def main() -> None:
             f"ImportError: {e}"
         ) from e
 
-    browser = AsyncSentienceBrowser(
-        api_key=sentience_api_key,
+    browser = AsyncPredicateBrowser(
+        api_key=predicate_api_key,
         headless=HEADLESS,
         user_data_dir=str(base_dir / "profile"),
         record_video_dir=str(video_dir) if RECORD_VIDEO else None,
         allowed_domains=["dw.com"],
-        executable_path=SENTIENCE_BROWSER_EXECUTABLE_PATH,
+        executable_path=PREDICATE_BROWSER_EXECUTABLE_PATH,
     )
     await browser.start()
     if browser.context is not None:
@@ -345,11 +344,11 @@ async def main() -> None:
     await browser.goto(START_URL)
     page = browser.page
     if page is None:
-        raise RuntimeError("SentienceBrowser did not create a page.")
+        raise RuntimeError("PredicateBrowser did not create a page.")
     await _dismiss_dw_modal(page)
-    await _wait_for_sentience(page, timeout_ms=30000)
+    await _wait_for_predicate(page, timeout_ms=30000)
 
-    dbg = SentienceDebugger.attach(
+    dbg = PredicateDebugger.attach(
         page=page,
         tracer=tracer,
         snapshot_options=SnapshotOptions(
@@ -358,7 +357,7 @@ async def main() -> None:
             limit=50,
             screenshot=ScreenshotConfig(format=SCREENSHOT_FORMAT, quality=SCREENSHOT_QUALITY),
         ),
-        sentience_api_key=sentience_api_key,
+        predicate_api_key=predicate_api_key,
     )
 
     if True:
@@ -401,7 +400,7 @@ async def main() -> None:
                 await page.goto(START_URL, wait_until="domcontentloaded")
                 await asyncio.sleep(1.0)
                 await _dismiss_dw_modal(page)
-                await _wait_for_sentience(page, timeout_ms=30000)
+                await _wait_for_predicate(page, timeout_ms=30000)
                 return "Opened DW homepage"
 
             tools = [open_dw_homepage]
@@ -660,7 +659,7 @@ async def main() -> None:
                 index_dst = trace_dst.with_suffix(".index.json")
                 if trace_dst.exists() and not index_dst.exists():
                     try:
-                        from sentience.trace_indexing import write_trace_index
+                        from predicate.trace_indexing import write_trace_index
 
                         write_trace_index(str(trace_dst), str(index_dst), frontend_format=True)
                     except Exception:

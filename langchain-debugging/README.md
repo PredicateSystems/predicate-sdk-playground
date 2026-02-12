@@ -1,10 +1,10 @@
-# LangChain + SentienceDebugger (Playground Demo)
+# LangChain + PredicateDebugger (Playground Demo)
 
-This playground shows how to attach **SentienceDebugger** to a **SentienceBrowser**
+This playground shows how to attach **PredicateDebugger** to a **PredicateBrowser**
 page while a **LangChain / LangGraph** agent drives the browser.
 
 You get:
-- per-step **verification** in Sentience Studio
+- per-step **verification** in Predicate Studio
 - screenshots + optional overlay annotations
 - optional Playwright video artifact
 
@@ -47,7 +47,7 @@ This keeps the Studio timeline intuitive: navigation verifies domain; the entry 
 From repo root (recommended: use your existing playground venv):
 
 ```bash
-pip install sentienceapi langchain langchain-openai langgraph playwright python-dotenv moviepy pillow
+pip install predicatelabs langchain langchain-openai langgraph playwright python-dotenv moviepy pillow
 playwright install chromium
 ```
 
@@ -56,7 +56,7 @@ playwright install chromium
 Set required env vars:
 
 ```bash
-export SENTIENCE_API_KEY="sk_pro_..."
+export PREDICATE_API_KEY="sk_pro_..."
 export OPENAI_API_KEY="sk_..."
 export OPENAI_MODEL="gpt-4o"
 ```

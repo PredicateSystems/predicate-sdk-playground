@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-browser-use + SentienceDebugger demo (sidecar verification + trace).
+browser-use + PredicateDebugger demo (sidecar verification + trace).
 
 This is intentionally a "minimal adapter" demo:
 - browser-use owns the browser session
-- SentienceDebugger attaches to the Playwright Page and verifies outcomes
+- PredicateDebugger attaches to the Playwright Page and verifies outcomes
 - We emit per-step screenshots and stitch them into a simple mp4 with token overlays
 """
 
@@ -43,14 +43,14 @@ _BROWSER_USE_DEV = Path("/Users/guoliangwang/Code/Python/browser-use")
 if _BROWSER_USE_DEV.exists():
     sys.path.insert(0, str(_BROWSER_USE_DEV))
 
-from sentience import SentienceDebugger, get_extension_dir
-from sentience.agent_runtime import AgentRuntime
-from sentience.models import SnapshotOptions
-from sentience.tracer_factory import create_tracer
-from sentience.verification import any_of, custom, exists, url_contains
+from predicate import PredicateDebugger, get_extension_dir
+from predicate.agent_runtime import AgentRuntime
+from predicate.models import SnapshotOptions
+from predicate.tracer_factory import create_tracer
+from predicate.verification import any_of, custom, exists, url_contains
 
-from sentience.backends.actions import type_text as backend_type_text
-from sentience.backends import BrowserUseAdapter
+from predicate.backends.actions import type_text as backend_type_text
+from predicate.backends import BrowserUseAdapter
 
 from shared.playwright_video import try_persist_page_video
 try:
@@ -240,7 +240,7 @@ async def connect_playwright_page_from_browser_use_session(session):
     """
     Mirror browser-use's official Sentience integration strategy:
     - Use browser-use for navigation (session.navigate_to)
-    - For verification/snapshots, attach SentienceDebugger to a real Playwright Page
+    - For verification/snapshots, attach PredicateDebugger to a real Playwright Page
       by connecting Playwright to the same browser via CDP.
     """
     cdp_url = getattr(session, "cdp_url", None)
@@ -302,7 +302,7 @@ async def connect_playwright_page_from_browser_use_session(session):
     return playwright, browser, page
 
 
-async def ensure_sentience_injected_on_playwright_page(page, *, timeout_s: float = 30.0) -> None:
+async def ensure_predicate_injected_on_playwright_page(page, *, timeout_s: float = 30.0) -> None:
     """
     Ensure window.sentience.snapshot is available on the given Page.
 
@@ -354,7 +354,7 @@ async def ensure_sentience_injected_on_playwright_page(page, *, timeout_s: float
                 pass
             await _sleep_ms(500)
         raise TimeoutError(
-            f"Sentience extension not injected after {timeout_s}s (last_err={last_err})"
+            f"Predicate extension not injected after {timeout_s}s (last_err={last_err})"
         )
 
 
@@ -419,7 +419,7 @@ async def _sync_playwright_page_to_browser_use(session, pw_browser, page, dbg) -
 
     # Rebind runtime backend to the new page (keep same tracer/step timeline).
     try:
-        from sentience.backends.playwright_backend import PlaywrightBackend
+        from predicate.backends.playwright_backend import PlaywrightBackend
 
         dbg.runtime.backend = PlaywrightBackend(page)
     except Exception:
@@ -428,7 +428,7 @@ async def _sync_playwright_page_to_browser_use(session, pw_browser, page, dbg) -
     return page
 
 
-async def wait_for_sentience_extension_ready(backend, *, timeout_s: float = 30.0) -> None:
+async def wait_for_predicate_extension_ready(backend, *, timeout_s: float = 30.0) -> None:
     """
     Wait (with diagnostics) until the Sentience content script is injected.
 
@@ -521,7 +521,7 @@ async def wait_for_sentience_extension_ready(backend, *, timeout_s: float = 30.0
         await _sleep_ms(200)
 
     raise RuntimeError(
-        "Sentience extension did not become ready in time. "
+        "Predicate extension did not become ready in time. "
         f"diagnostics={last_diag!r}"
     )
 
@@ -680,7 +680,7 @@ async def ensure_session_on_real_url(session, *, start_url: str, task_text: str 
     Ensure the *current tab* is on a real URL (not about:blank).
 
     This mirrors browser-use's official Sentience integration:
-    - Sentience extension does not inject on about:blank / about:*
+    - Predicate extension does not inject on about:blank / about:*
     - Use BrowserSession.navigate_to() to navigate the existing tab, rather than
       opening a second tab (which often leaves an about:blank tab around).
     """
@@ -775,12 +775,12 @@ def _maybe_make_browser_profile_kwargs(*, record_video_dir: str | None) -> dict:
     # Common knobs we want
     kwargs["headless"] = False
 
-    # We must load the Sentience extension for window.sentience.snapshot()
+    # We must load the Predicate extension for window.sentience.snapshot()
     sentience_ext = get_extension_dir()
-    print(f"[demo] Sentience extension dir: {sentience_ext}")
+    print(f"[demo] Predicate extension dir: {sentience_ext}")
 
     # IMPORTANT: Chrome only respects the LAST --load-extension arg.
-    # For this demo we load ONLY the Sentience extension by default.
+    # For this demo we load ONLY the Predicate extension by default.
     # browser-use default extensions can affect page rendering (e.g. adblock / DNR rules),
     # which can make pages look like "images are missing".
     def _manifest_version(ext_dir: str) -> int | None:
@@ -956,9 +956,9 @@ async def main() -> None:
     global DEMO_MODE, START_URL
     DEMO_MODE = (os.getenv("DEMO_MODE") or "fix").strip().lower()
     START_URL = (os.getenv("BROWSER_USE_START_URL") or DW_URL).strip()
-    sentience_api_key = os.getenv("SENTIENCE_API_KEY")
-    if not sentience_api_key:
-        raise SystemExit("Missing SENTIENCE_API_KEY in environment.")
+    predicate_api_key = os.getenv("PREDICATE_API_KEY")
+    if not predicate_api_key:
+        raise SystemExit("Missing PREDICATE_API_KEY in environment.")
 
     # browser-use ChatBrowserUse reads BROWSER_USE_API_KEY from env.
     if not os.getenv("BROWSER_USE_API_KEY"):
@@ -978,7 +978,7 @@ async def main() -> None:
     run_label = f"browser-use-debug-{timestamp}"
     run_id = str(uuid.uuid4())
     tracer = create_tracer(
-        api_key=sentience_api_key,
+        api_key=predicate_api_key,
         run_id=run_id,
         upload_trace=True,
         goal=f"[demo] {run_label} | DW news task",
@@ -988,7 +988,7 @@ async def main() -> None:
     )
 
     print(f"[demo] run_label={run_label}")
-    print(f"[demo] run_id={run_id} (UUID; used by Sentience Studio)")
+    print(f"[demo] run_id={run_id} (UUID; used by Predicate Studio)")
     print(f"[demo] DEMO_MODE={DEMO_MODE!r} (set DEMO_MODE=fail to force a failing trace)")
     print(
         "[demo] NOTE: this demo is designed to show the key contrast:\n"
@@ -1007,7 +1007,7 @@ async def main() -> None:
     except ImportError as e:
         raise SystemExit(
             "browser-use is required.\n"
-            "Install: pip install \"sentienceapi[browser-use]\"\n"
+            "Install: pip install \"predicatelabs[browser-use]\"\n"
             f"ImportError: {e}"
         ) from e
 
@@ -1037,12 +1037,12 @@ async def main() -> None:
     await debug_print_extension_targets(session)
 
     # SIMPLIFIED STRATEGY: Use browser-use's native CDP session like the working integration.
-    # Don't connect external Playwright - just use SentienceContext.build() which internally
+    # Don't connect external Playwright - just use PredicateContext.build() which internally
     # calls BrowserUseAdapter.create_backend().
     pw = None
     pw_browser = None
     page = None
-    dbg: SentienceDebugger | None = None
+    dbg: PredicateDebugger | None = None
     playwright_attached = False
     cdp_backend_created = False
 
@@ -1057,12 +1057,12 @@ async def main() -> None:
     print("[demo] Waiting 3s for browser to stabilize...", flush=True)
     await asyncio.sleep(3.0)
 
-    # Use SentienceContext.build() like the working integration does
+    # Use PredicateContext.build() like the working integration does
     # This uses BrowserUseAdapter internally
-    print("[demo] Testing SentienceContext.build() (like working integration)...", flush=True)
-    from sentience.backends.sentience_context import SentienceContext
+    print("[demo] Testing PredicateContext.build() (like working integration)...", flush=True)
+    from predicate.backends.sentience_context import SentienceContext
     sentience_ctx = SentienceContext(
-        sentience_api_key=sentience_api_key,
+        predicate_api_key=predicate_api_key,
         use_api=True,
         max_elements=60,
         show_overlay=True,
@@ -1079,11 +1079,11 @@ async def main() -> None:
             timeout=60.0
         )
         if ctx_state:
-            print(f"[demo] SentienceContext.build() succeeded! Elements: {len(ctx_state.snapshot.elements)}", flush=True)
+            print(f"[demo] PredicateContext.build() succeeded! Elements: {len(ctx_state.snapshot.elements)}", flush=True)
         else:
-            print("[demo] SentienceContext.build() returned None (snapshot failed)", flush=True)
+            print("[demo] PredicateContext.build() returned None (snapshot failed)", flush=True)
     except Exception as ctx_err:
-        print(f"[demo] SentienceContext.build() failed: {type(ctx_err).__name__}: {ctx_err}", flush=True)
+        print(f"[demo] PredicateContext.build() failed: {type(ctx_err).__name__}: {ctx_err}", flush=True)
         import traceback
         traceback.print_exc()
 
@@ -1098,18 +1098,18 @@ async def main() -> None:
         runtime = AgentRuntime(
             backend=backend,
             tracer=tracer,
-            sentience_api_key=sentience_api_key,
+            predicate_api_key=predicate_api_key,
             snapshot_options=SnapshotOptions(
                 use_api=True,
                 limit=100,
                 screenshot=True,  # Enable screenshots for trace upload to Studio
                 show_overlay=True,
                 goal="browser-use-debug-demo",
-                sentience_api_key=sentience_api_key,
+                predicate_api_key=predicate_api_key,
             ),
         )
-        dbg = SentienceDebugger(runtime=runtime)
-        print("[demo] SentienceDebugger created via browser-use CDP!", flush=True)
+        dbg = PredicateDebugger(runtime=runtime)
+        print("[demo] PredicateDebugger created via browser-use CDP!", flush=True)
 
     except Exception as adapter_err:
         print(f"[demo] BrowserUseAdapter.create_backend() failed: {type(adapter_err).__name__}: {adapter_err}", flush=True)
@@ -1123,7 +1123,7 @@ async def main() -> None:
         print("[demo] WARNING: session.get_current_page() returned None", flush=True)
 
     token_summary = {
-        "demo_name": "browser-use + SentienceDebugger (verification sidecar)",
+        "demo_name": "browser-use + PredicateDebugger (verification sidecar)",
         "total_prompt_tokens": 0,
         "total_completion_tokens": 0,
         "total_tokens": 0,
@@ -1163,7 +1163,7 @@ async def main() -> None:
                 required=True,
             ).eventually(timeout_s=10)
 
-        # Wait for Sentience extension to inject.
+        # Wait for Predicate extension to inject.
         #
         # IMPORTANT:
         # - The demo's snapshots should not depend on Playwright being able to evaluate
@@ -1172,7 +1172,7 @@ async def main() -> None:
         #   in the same environment browser-use uses for actions.
         # - BUT: if Playwright attach succeeded, skip browser-use CDP backend creation
         #   (it can hang due to CDP session conflicts).
-        print("[demo] waiting for Sentience extension to inject...", flush=True)
+        print("[demo] waiting for Predicate extension to inject...", flush=True)
         if not playwright_attached and not cdp_backend_created:
             # Only create browser-use CDP backend if we're in CDP-only mode AND don't already have one
             await _fallback_to_browser_use_backend(session, dbg)
@@ -1181,19 +1181,19 @@ async def main() -> None:
             print(f"[demo] Skipping _fallback_to_browser_use_backend ({reason})", flush=True)
         try:
             await await_with_timeout(
-                "wait_for_sentience_extension_ready",
-                wait_for_sentience_extension_ready(dbg.runtime.backend, timeout_s=30),  # type: ignore[arg-type]
+                "wait_for_predicate_extension_ready",
+                wait_for_predicate_extension_ready(dbg.runtime.backend, timeout_s=30),  # type: ignore[arg-type]
                 timeout_s=35,
             )
         except (asyncio.TimeoutError, Exception) as ext_wait_err:
             # Extension is likely ready (chrome stderr confirms WASM loaded), but CDP eval is flaky.
             # Continue anyway - snapshot will fail if extension truly isn't ready.
-            print(f"[demo] wait_for_sentience_extension_ready failed: {type(ext_wait_err).__name__}, continuing anyway", flush=True)
+            print(f"[demo] wait_for_predicate_extension_ready failed: {type(ext_wait_err).__name__}, continuing anyway", flush=True)
 
         # Optional: also verify Playwright can observe injection (debug-only).
         if (os.getenv("CHECK_PLAYWRIGHT_SENTIENCE") or "").strip().lower() in ("1", "true", "yes"):
-            await ensure_sentience_injected_on_playwright_page(page, timeout_s=15)
-        print("[demo] Sentience extension ready (window.sentience.snapshot is available).", flush=True)
+            await ensure_predicate_injected_on_playwright_page(page, timeout_s=15)
+        print("[demo] Predicate extension ready (window.sentience.snapshot is available).", flush=True)
         try:
             await await_with_timeout(
                 "dbg.snapshot(verify:extension_ready)",
@@ -1379,10 +1379,10 @@ async def main() -> None:
                 print("[demo] browser-use agent will attempt to dismiss modal via vision", flush=True)
 
             await await_with_timeout(
-                "wait_for_sentience_on_homepage",
+                "wait_for_predicate_on_homepage",
                 # Use the same CDP execution path as snapshots to avoid browser-use Page API
                 # differences (evaluate vs evaluate_js) and isolated-world issues.
-                wait_for_sentience_extension_ready(dbg.runtime.backend, timeout_s=30),  # type: ignore[arg-type]
+                wait_for_predicate_extension_ready(dbg.runtime.backend, timeout_s=30),  # type: ignore[arg-type]
                 timeout_s=35,
             )
 
@@ -1503,13 +1503,13 @@ async def main() -> None:
                     if pw_browser is not None:
                         try:
                             await await_with_timeout(
-                                f"wait_for_sentience_after_step({i})",
-                                ensure_sentience_injected_on_playwright_page(page, timeout_s=30),
+                                f"wait_for_predicate_after_step({i})",
+                                ensure_predicate_injected_on_playwright_page(page, timeout_s=30),
                                 timeout_s=35,
                             )
                         except TimeoutError:
                             print(
-                                f"[demo] wait_for_sentience_after_step({i}) timed out in Playwright; "
+                                f"[demo] wait_for_predicate_after_step({i}) timed out in Playwright; "
                                 "switching dbg backend to browser-use CDP for snapshots",
                                 flush=True,
                             )
@@ -1517,13 +1517,13 @@ async def main() -> None:
                     else:
                         try:
                             await await_with_timeout(
-                                f"wait_for_sentience_after_step({i})",
-                                wait_for_sentience_extension_ready(dbg.runtime.backend, timeout_s=10),  # type: ignore[arg-type]
+                                f"wait_for_predicate_after_step({i})",
+                                wait_for_predicate_extension_ready(dbg.runtime.backend, timeout_s=10),  # type: ignore[arg-type]
                                 timeout_s=12,
                             )
                         except Exception as e:
                             print(
-                                f"[demo] wait_for_sentience_after_step({i}) backend-ready check failed: {type(e).__name__}: {e}",
+                                f"[demo] wait_for_predicate_after_step({i}) backend-ready check failed: {type(e).__name__}: {e}",
                                 flush=True,
                             )
                     await dbg.snapshot(

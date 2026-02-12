@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-We successfully integrated Qwen 2.5 3B as a local LLM for web automation tasks using the Sentience SDK. The demo performs a complete Google search workflow: finding the search box, typing a query, and selecting the first organic search result.
+We successfully integrated Qwen 2.5 3B as a local LLM for web automation tasks using the Predicate SDK. The demo performs a complete Google search workflow: finding the search box, typing a query, and selecting the first organic search result.
 
 **Key Results**:
 - **Total Tokens**: 1,334 tokens (Scene 1: 300, Scene 3: 1,034)
@@ -434,6 +434,6 @@ IMPORTANT RULES:
 ---
 
 **Report Generated**: December 23, 2024
-**Author**: Claude (with Sentience SDK team)
+**Author**: Claude (with Predicate SDK team)
 **Model Used**: Claude Sonnet 4.5 (for report generation)
 **Demo Model**: Qwen 2.5 3B Instruct (for web automation)

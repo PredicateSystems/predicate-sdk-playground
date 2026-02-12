@@ -9,7 +9,7 @@ A virtual environment has been created with MoviePy 1.x and all dependencies ins
 ✅ Virtual environment created (`venv/`)
 ✅ MoviePy 1.0.3 installed (compatible version)
 ✅ All dependencies installed
-✅ Sentience SDK installed
+✅ Predicate SDK installed
 ✅ Playwright browsers downloaded
 ✅ Shell scripts created for easy execution
 
@@ -24,7 +24,7 @@ Expected output:
 ```
 ✅ .env file found
 ✅ OPENAI_API_KEY found
-✅ SENTIENCE_API_KEY found
+✅ PREDICATE_API_KEY found
 ✅ openai installed
 ✅ playwright installed
 ✅ sentience SDK importable
@@ -128,7 +128,7 @@ playwright install chromium
 - **playwright**: Browser automation (1.41.0)
 - **moviepy**: Video generation (1.0.3) ⚠️ Version 1.x required!
 - **Pillow**: Image processing (10.2.0)
-- **sentience-python**: SDK (installed from parent directory)
+- **predicatelabs**: SDK (installed from parent directory)
 
 ### System Dependencies:
 - **ImageMagick**: Text rendering for MoviePy
@@ -152,7 +152,7 @@ playground/
 Make sure your `.env` file contains:
 ```
 OPENAI_API_KEY=sk-...
-SENTIENCE_API_KEY=...  # Optional, will use free tier if not set
+PREDICATE_API_KEY=...  # Optional, will use free tier if not set
 ```
 
 ## Ready to Run!

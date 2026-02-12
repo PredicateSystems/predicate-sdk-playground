@@ -1,12 +1,12 @@
-# Local LLM Integration with Sentience SDK
+# Local LLM Integration with Predicate SDK
 
-*Design guide for integrating small, local LLMs (Qwen 2.5 3B, Gemma 2 2B/9B) with Sentience Python SDK*
+*Design guide for integrating small, local LLMs (Qwen 2.5 3B, Gemma 2 2B/9B) with Predicate Python SDK*
 
 ---
 
 ## Overview
 
-This document outlines a design for integrating **small, local language models** with the Sentience SDK as an alternative to cloud-based LLMs like GPT-4. Local LLMs offer:
+This document outlines a design for integrating **small, local language models** with the Predicate SDK as an alternative to cloud-based LLMs like GPT-4. Local LLMs offer:
 
 - **Zero API costs**: No per-token charges
 - **Privacy**: All processing happens locally
@@ -714,7 +714,7 @@ class ResponseParser:
 
 ```python
 from typing import Optional, Dict, Any
-from sentience import SentienceBrowser, snapshot, click_rect
+from predicate import PredicateBrowser, snapshot, click_rect
 
 
 class LocalLLMWebAgent:
@@ -744,7 +744,7 @@ class LocalLLMWebAgent:
 
     def find_and_click_element(
         self,
-        browser: SentienceBrowser,
+        browser: PredicateBrowser,
         task_type: str,
         context: str = ""
     ) -> bool:
@@ -875,7 +875,7 @@ def demo_local_llm():
     agent = LocalLLMWebAgent(llm=llm, max_elements=15, verbose=True)
 
     # Run automation
-    with SentienceBrowser(headless=False) as browser:
+    with PredicateBrowser(headless=False) as browser:
         # Navigate to Google
         browser.goto("https://www.google.com")
         browser.page.wait_for_load_state("networkidle")
@@ -1018,7 +1018,7 @@ class RobustLocalLLMAgent(LocalLLMWebAgent):
 
     def find_and_click_element(
         self,
-        browser: SentienceBrowser,
+        browser: PredicateBrowser,
         task_type: str,
         context: str = "",
         max_retries: int = 2
@@ -1086,7 +1086,7 @@ class RobustLocalLLMAgent(LocalLLMWebAgent):
 
 ```bash
 # Core dependencies
-pip install sentience-python
+pip install predicatelabs
 pip install transformers accelerate torch
 
 # Optional: For quantization
@@ -1283,7 +1283,7 @@ For most web automation tasks, a well-optimized local 3B model can match 80% of 
 - [Qwen 2.5 Model Card](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct)
 - [Gemma 2 Documentation](https://huggingface.co/google/gemma-2-2b)
 - [Hugging Face Transformers Docs](https://huggingface.co/docs/transformers)
-- [Sentience Python SDK](https://github.com/SentienceAPI/sdk-python)
+- [Predicate Python SDK](https://github.com/PredicateLabs/sdk-python)
 
 ---
 
