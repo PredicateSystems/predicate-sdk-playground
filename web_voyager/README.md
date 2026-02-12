@@ -1,7 +1,7 @@
-# WebVoyager Demo Plan (Sentience SDK Playground)
+# WebVoyager Demo Plan (Predicate SDK Playground)
 
 This document captures potential challenges when running WebVoyager-style tasks with
-compact prompts, and the mitigations available in the Sentience SDK.
+compact prompts, and the mitigations available in the Predicate SDK.
 
 ---
 

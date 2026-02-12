@@ -1,6 +1,6 @@
 # Google Search Demo: SDK vs Vision
 
-Simple test comparing Sentience SDK vs GPT-4o Vision for basic web automation.
+Simple test comparing Predicate SDK vs GPT-4o Vision for basic web automation.
 
 ## The Challenge
 
@@ -42,7 +42,7 @@ source venv/bin/activate  # If using venv from amazon_shopping demos
 2. Environment variables in `../.env`:
 ```
 OPENAI_API_KEY=your_key_here
-SENTIENCE_API_KEY=your_key_here  # Only needed for demo1
+PREDICATE_API_KEY=your_key_here  # Only needed for demo1
 ```
 
 ### Run Demo 1 (SDK)
@@ -171,7 +171,7 @@ After running both demos, compare:
 ## Troubleshooting
 
 **Demo 1 Issues**:
-- "API key not found": Set `SENTIENCE_API_KEY` in `../.env`
+- "API key not found": Set `PREDICATE_API_KEY` in `../.env`
 - "No elements found": Google layout may have changed, check annotated screenshots
 
 **Demo 2 Issues**:

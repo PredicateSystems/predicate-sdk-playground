@@ -1,6 +1,6 @@
 # Demo Reports
 
-Performance and execution reports for 5 web automation demos using Sentience SDK with local LLM (Qwen2.5 3B) and assertion-based verification.
+Performance and execution reports for 5 web automation demos using Predicate SDK with local LLM (Qwen2.5 3B) and assertion-based verification.
 
 ## Why This Matters
 
@@ -12,9 +12,9 @@ Performance and execution reports for 5 web automation demos using Sentience SDK
 
 **AgentRuntime** provides machine-verifiable agent loops with declarative assertions. Works with local LLMs (Qwen2.5 3B) and cloud LLMs (GPT-4, Claude). **Qwen-3VL** available as vision fallback when LLM exhausts max attempts.
 
-**Assertions**: Predicates (`url_contains`, `exists`, `is_enabled`) evaluate browser state. `runtime.assert_()` evaluates once; `runtime.check().eventually()` retries with fresh snapshots; `runtime.assert_done()` marks task completion. See [Sentience API Documentation](https://www.sentienceapi.com/docs).
+**Assertions**: Predicates (`url_contains`, `exists`, `is_enabled`) evaluate browser state. `runtime.assert_()` evaluates once; `runtime.check().eventually()` retries with fresh snapshots; `runtime.assert_done()` marks task completion. See [Predicate SDK documentation](https://predicatelabs.dev/docs).
 
-**Tracer**: Emits events to Sentience Studio for trace replay, time-travel debugging, and UI diffing visualization.
+**Tracer**: Emits events to Predicate Studio for trace replay, time-travel debugging, and UI diffing visualization.
 
 ---
 
@@ -115,18 +115,18 @@ Fallback remains available for cases where LLM genuinely cannot understand page 
 ### D. Reproduction Steps
 
 **Prerequisites**:
-1. Install: `pip install -r requirements.txt && pip install sentienceapi`
-2. Get API key: [www.sentienceapi.com](https://www.sentienceapi.com) (free tier available)
-3. Set `SENTIENCE_API_KEY` in `.env` or environment
+1. Install: `pip install -r requirements.txt && pip install predicatelabs`
+2. Get API key: [predicatelabs.dev](https://predicatelabs.dev) (free tier available)
+3. Set `PREDICATE_API_KEY` in `.env` or environment
 
 **Enable Visual Overlay**:
 ```python
-from sentience.models import SnapshotOptions
+from predicate.models import SnapshotOptions
 snapshot_options = SnapshotOptions(show_overlay=True, goal="Your task goal here")
 ```
 
 **Run Demo**: `cd <demo_directory> && python main.py`
 
-**View Traces**: [Sentience Studio](https://www.sentienceapi.com/studio) for replay and debugging (login required).
+**View Traces**: [Predicate Studio](https://predicatelabs.dev/studio) for replay and debugging (login required).
 
-**Help**: [GitHub Issues](https://github.com/SentienceAPI/sentience-sdk-playground/issues) | [Documentation](https://www.sentienceapi.com/docs)
+**Help**: [GitHub Issues](https://github.com/PredicateLabs/sentience-sdk-playground/issues) | [Documentation](https://predicatelabs.dev/docs)

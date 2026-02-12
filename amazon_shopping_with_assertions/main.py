@@ -52,16 +52,16 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "amazon_shopping", "shared"))
 from video_generator_simple import create_demo_video
 
-from sentience.actions import click_async, press_async
-from sentience.async_api import AsyncSentienceBrowser
-from sentience.backends.playwright_backend import PlaywrightBackend
-from sentience.backends.sentience_context import SentienceContext
-from sentience.cursor_policy import CursorPolicy
-from sentience.models import SnapshotOptions
-from sentience.tracer_factory import create_tracer
-from sentience.verification import AssertOutcome, exists, url_contains, is_enabled, any_of, all_of
-from sentience.agent_runtime import AgentRuntime
-from sentience.llm_provider import LocalLLMProvider
+from predicate.actions import click_async, press_async
+from predicate.async_api import AsyncPredicateBrowser
+from predicate.backends.playwright_backend import PlaywrightBackend
+from predicate.backends.sentience_context import SentienceContext
+from predicate.cursor_policy import CursorPolicy
+from predicate.models import SnapshotOptions
+from predicate.tracer_factory import create_tracer
+from predicate.verification import AssertOutcome, exists, url_contains, is_enabled, any_of, all_of
+from predicate.agent_runtime import AgentRuntime
+from predicate.llm_provider import LocalLLMProvider
 
 
 # Test search query
@@ -144,14 +144,14 @@ async def main() -> None:
 
     # Help debug env issues quickly
     try:
-        import sentience as _sentience
+        import predicate as _predicate
 
-        if "site-packages/sentience" in (_sentience.__file__ or ""):
+        if "site-packages/predicate" in (_predicate.__file__ or ""):
             print(
-                f"[warn] Using sentience from site-packages: {_sentience.__file__}\n"
+                f"[warn] Using sentience from site-packages: {_predicate.__file__}\n"
                 f"       Python: {sys.executable}\n"
                 f"       If you expected the monorepo SDK, activate the demo venv and run:\n"
-                f"         pip install sentienceapi\n",
+                f"         pip install predicatelabs\n",
                 flush=True,
             )
     except Exception:
@@ -165,8 +165,8 @@ async def main() -> None:
     start_ts = time.time()
     run_id = str(uuid.uuid4())
 
-    sentience_api_key = os.getenv("SENTIENCE_API_KEY")
-    use_api = bool((sentience_api_key or "").strip())
+    predicate_api_key = os.getenv("PREDICATE_API_KEY")
+    use_api = bool((predicate_api_key or "").strip())
 
     # Tier 1: local text LLM (HF transformers)
     local_text_model = os.getenv("LOCAL_TEXT_MODEL") or "Qwen/Qwen2.5-3B-Instruct"
@@ -174,9 +174,9 @@ async def main() -> None:
 
     # Cloud tracing
     tracer = create_tracer(
-        api_key=sentience_api_key,
+        api_key=predicate_api_key,
         run_id=run_id,
-        upload_trace=bool(sentience_api_key),
+        upload_trace=bool(predicate_api_key),
         goal=task_goal,
         agent_type="public_build/amazon_shopping_with_assertions",
         llm_model=local_text_model,
@@ -191,9 +191,9 @@ async def main() -> None:
     print(f"Screenshots will be saved to: {screenshots_dir}")
 
     # Browser with persistent profile (helps with Amazon bot detection)
-    # NOTE: AsyncSentienceBrowser automatically applies stealth if playwright-stealth is installed
+    # NOTE: AsyncPredicateBrowser automatically applies stealth if playwright-stealth is installed
     user_data_dir = os.path.join(os.path.dirname(__file__), ".user_data")
-    async with AsyncSentienceBrowser(headless=False, user_data_dir=user_data_dir) as browser:
+    async with AsyncPredicateBrowser(headless=False, user_data_dir=user_data_dir) as browser:
         if browser.page is None:
             raise RuntimeError("Browser page not initialized")
 
@@ -204,7 +204,7 @@ async def main() -> None:
         runtime = AgentRuntime(
             backend=backend,
             tracer=tracer,
-            sentience_api_key=sentience_api_key,
+            predicate_api_key=predicate_api_key,
             snapshot_options=SnapshotOptions(
                 limit=50,
                 screenshot=False,
@@ -212,7 +212,7 @@ async def main() -> None:
                 show_grid=show_grid,
                 goal=snapshot_goal,
                 use_api=True if use_api else None,
-                sentience_api_key=sentience_api_key if use_api else None,
+                predicate_api_key=predicate_api_key if use_api else None,
             ),
         )
 

@@ -45,19 +45,19 @@ from video_generator_simple import create_demo_video
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "amazon_shopping_with_assertions"))
 from main import StepTokenUsage
 
-from sentience.actions import click_async, press_async
-from sentience.agent_runtime import AgentRuntime
-from sentience.async_api import AsyncSentienceBrowser
-from sentience.backends.playwright_backend import PlaywrightBackend
-from sentience.backends.sentience_context import SentienceContext
-from sentience.cursor_policy import CursorPolicy
-from sentience.failure_artifacts import FailureArtifactsOptions
-from sentience.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
-from sentience.models import Snapshot, SnapshotOptions
-from sentience.snapshot_diff import SnapshotDiff
-from sentience.trace_event_builder import TraceEventBuilder
-from sentience.tracer_factory import create_tracer
-from sentience.verification import (
+from predicate.actions import click_async, press_async
+from predicate.agent_runtime import AgentRuntime
+from predicate.async_api import AsyncPredicateBrowser
+from predicate.backends.playwright_backend import PlaywrightBackend
+from predicate.backends.sentience_context import SentienceContext
+from predicate.cursor_policy import CursorPolicy
+from predicate.failure_artifacts import FailureArtifactsOptions
+from predicate.llm_provider import LocalVisionLLMProvider, MLXVLMProvider
+from predicate.models import Snapshot, SnapshotOptions
+from predicate.snapshot_diff import SnapshotDiff
+from predicate.trace_event_builder import TraceEventBuilder
+from predicate.tracer_factory import create_tracer
+from predicate.verification import (
     all_of,
     any_of,
     custom,
@@ -67,7 +67,7 @@ from sentience.verification import (
     url_contains,
     url_matches,
 )
-from sentience import CaptchaOptions, HumanHandoffSolver
+from predicate import CaptchaOptions, HumanHandoffSolver
 
 
 SEARCH_QUERY = os.getenv("AMAZON_QUERY", "thinkpad")
@@ -1106,7 +1106,7 @@ def is_yes(text: str) -> bool:
     return text.strip().upper().startswith("YES")
 
 
-async def get_page_screenshot_base64(browser: AsyncSentienceBrowser) -> str:
+async def get_page_screenshot_base64(browser: AsyncPredicateBrowser) -> str:
     png_bytes = await browser.page.screenshot(full_page=False)
     return base64.b64encode(png_bytes).decode("ascii")
 
@@ -1114,7 +1114,7 @@ async def get_page_screenshot_base64(browser: AsyncSentienceBrowser) -> str:
 async def vision_fallback_check(
     *,
     vision_llm: Any,
-    browser: AsyncSentienceBrowser,
+    browser: AsyncPredicateBrowser,
     goal: str,
     verify: list[dict[str, Any]],
     reason: str,
@@ -1140,7 +1140,7 @@ async def vision_fallback_check(
 async def vision_select_click_id(
     *,
     vision_llm: Any,
-    browser: AsyncSentienceBrowser,
+    browser: AsyncPredicateBrowser,
     goal: str,
     compact: str,
     reason: str,
@@ -1626,7 +1626,7 @@ async def type_with_stealth(page, text: str):
 async def run_executor_step(
     step: dict[str, Any],
     runtime: AgentRuntime,
-    browser: AsyncSentienceBrowser,
+    browser: AsyncPredicateBrowser,
     executor: LocalHFModel,
     ctx_formatter: SentienceContext,
     cursor_policy: CursorPolicy,
@@ -2165,7 +2165,7 @@ async def run_executor_step(
 async def maybe_run_optional_substeps(
     step: dict[str, Any],
     runtime: AgentRuntime,
-    browser: AsyncSentienceBrowser,
+    browser: AsyncPredicateBrowser,
     executor: LocalHFModel,
     ctx_formatter: SentienceContext,
     cursor_policy: CursorPolicy,
@@ -2355,8 +2355,8 @@ async def main() -> None:
                 model_name=vision_model, device="auto", torch_dtype="auto"
             )
 
-    sentience_api_key = os.getenv("SENTIENCE_API_KEY")
-    use_api = bool((sentience_api_key or "").strip())
+    predicate_api_key = os.getenv("PREDICATE_API_KEY")
+    use_api = bool((predicate_api_key or "").strip())
     run_id = str(uuid.uuid4())
     run_start_ts = time.time()
     feedback_dir = Path(__file__).parent / "planner_feedback"
@@ -2375,9 +2375,9 @@ async def main() -> None:
             handle.write(text)
 
     tracer = create_tracer(
-        api_key=sentience_api_key,
+        api_key=predicate_api_key,
         run_id=run_id,
-        upload_trace=True if sentience_api_key else False,
+        upload_trace=True if predicate_api_key else False,
         goal="Amazon planner + executor demo",
         agent_type="planner_executor_local",
         llm_model=f"{planner_model} -> {executor_model}",
@@ -2453,8 +2453,8 @@ async def main() -> None:
             },
         )
 
-        async with AsyncSentienceBrowser(
-            api_key=sentience_api_key, headless=False, user_data_dir=".user_data"
+        async with AsyncPredicateBrowser(
+            api_key=predicate_api_key, headless=False, user_data_dir=".user_data"
         ) as browser:
             if browser.page is None:
                 raise RuntimeError("Browser page not initialized")
@@ -2463,14 +2463,14 @@ async def main() -> None:
             runtime = AgentRuntime(
                 backend=backend,
                 tracer=tracer,
-                sentience_api_key=sentience_api_key,
+                predicate_api_key=predicate_api_key,
                 snapshot_options=SnapshotOptions(
                     limit=50,
                     screenshot=True,
                     show_overlay=True,
                     goal="User planner + executor to buy thinkpad on Amazon.com",
                     use_api=True if use_api else None,
-                    sentience_api_key=sentience_api_key if use_api else None,
+                    predicate_api_key=predicate_api_key if use_api else None,
                 ),
             )
             await runtime.enable_failure_artifacts(

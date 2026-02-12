@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from sentience.verification import custom, exists, url_contains
+from predicate.verification import custom, exists, url_contains
 
 
 @dataclass
