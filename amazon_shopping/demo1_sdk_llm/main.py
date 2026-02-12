@@ -1,5 +1,5 @@
 """
-Demo 1: Sentience SDK + LLM Agent for Amazon Shopping
+Demo 1: Predicate SDK + LLM Agent for Amazon Shopping
 
 This demo uses the SDK's snapshot() function to get structured JSON data,
 then uses an LLM to analyze the data and make decisions.
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'shared'))
 
-from sentience import SentienceBrowser, snapshot, click_rect, type_text, press
+from predicate import PredicateBrowser, snapshot, click_rect, type_text, press
 from llm_agent import LLMAgent
 from token_tracker import TokenTracker
 # Use simplified video generator (no ImageMagick/TextClip needed)
@@ -53,7 +53,7 @@ def main():
     # Load environment variables
     load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
     openai_api_key = os.getenv('OPENAI_API_KEY')
-    sentience_api_key = os.getenv('SENTIENCE_API_KEY')
+    predicate_api_key = os.getenv('PREDICATE_API_KEY')
 
     if not openai_api_key:
         print("ERROR: OPENAI_API_KEY not found in .env file")
@@ -72,10 +72,10 @@ def main():
     print(f"Screenshots will be saved to: {screenshots_dir}")
 
     print("\n" + "="*70)
-    print("DEMO 1: Sentience SDK + LLM Agent - Amazon Shopping")
+    print("DEMO 1: Predicate SDK + LLM Agent - Amazon Shopping")
     print("="*70)
 
-    with SentienceBrowser(api_key=sentience_api_key, headless=False) as browser:
+    with PredicateBrowser(api_key=predicate_api_key, headless=False) as browser:
         # Set viewport size (using 1600 height to allow panning in Scene 4)
         browser.page.set_viewport_size({"width": 1920, "height": 1080})
 

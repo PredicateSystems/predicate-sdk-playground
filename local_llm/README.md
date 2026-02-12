@@ -1,6 +1,6 @@
-## Local LLM Integration with Sentience SDK
+## Local LLM Integration with Predicate SDK
 
-This directory contains a complete implementation for using small, local LLMs (like Qwen 2.5 3B, Gemma 2 2B) with the Sentience Python SDK for web automation.
+This directory contains a complete implementation for using small, local LLMs (like Qwen 2.5 3B, Gemma 2 2B) with the Predicate Python SDK for web automation.
 
 ### ⚡ Quick Start Requirements
 
@@ -156,7 +156,7 @@ This runs the same task with different models and generates a comparison report.
 ```python
 from models.local_llm import LocalLLM
 from shared.web_agent import WebAgent
-from sentience import SentienceBrowser, snapshot
+from predicate import PredicateBrowser, snapshot
 
 # Initialize local LLM
 llm = LocalLLM(
@@ -169,7 +169,7 @@ llm = LocalLLM(
 agent = WebAgent(llm=llm, max_elements=15)
 
 # Use in automation
-with SentienceBrowser(headless=False) as browser:
+with PredicateBrowser(headless=False) as browser:
     browser.goto("https://www.google.com")
 
     # Get snapshot
@@ -382,4 +382,4 @@ For detailed design and architecture, see:
 
 ### License
 
-Same as Sentience SDK - see repository root.
+Same as Predicate SDK - see repository root.

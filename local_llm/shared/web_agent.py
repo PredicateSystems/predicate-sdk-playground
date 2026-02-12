@@ -55,7 +55,7 @@ class WebAgent:
         Analyze snapshot and select element using LLM
 
         Args:
-            snapshot_data: Snapshot data from Sentience SDK
+            snapshot_data: Snapshot data from Predicate SDK
             task_type: Type of element to find ("find_input", "find_button", "find_link", "select_from_list")
             context: Additional context (button text, link description, etc.)
             exclude_text_patterns: Text patterns to exclude (e.g., ["Ad", "Sponsored"])

@@ -2,7 +2,7 @@
 
 ## What Was Built
 
-A complete framework for integrating small, local LLMs (Qwen 2.5 3B, Gemma 2 2B, etc.) with the Sentience Python SDK for web automation.
+A complete framework for integrating small, local LLMs (Qwen 2.5 3B, Gemma 2 2B, etc.) with the Predicate Python SDK for web automation.
 
 ---
 
@@ -351,14 +351,14 @@ This is the main search input.
 ```python
 from models.local_llm import LocalLLM
 from shared.web_agent import WebAgent
-from sentience import SentienceBrowser, snapshot, click_rect
+from predicate import PredicateBrowser, snapshot, click_rect
 
 # Initialize
 llm = LocalLLM(model_name="Qwen/Qwen2.5-3B-Instruct")
 agent = WebAgent(llm=llm, max_elements=15)
 
 # Automate
-with SentienceBrowser(headless=False) as browser:
+with PredicateBrowser(headless=False) as browser:
     browser.goto("https://www.google.com")
 
     # Find search box
@@ -466,7 +466,7 @@ Testing imports...
   ✅ web_agent
 
 Testing dependencies...
-  ✅ Sentience SDK
+  ✅ Predicate SDK
   ✅ Hugging Face Transformers
   ✅ PyTorch
   ✅ OpenAI

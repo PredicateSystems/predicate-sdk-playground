@@ -10,14 +10,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 # Load environment
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
-from sentience import SentienceBrowser
+from predicate import PredicateBrowser
 
 print("Testing browser launch...")
 print("This will open a browser window for 5 seconds then close it.")
 print()
 
 try:
-    with SentienceBrowser(headless=False) as browser:
+    with PredicateBrowser(headless=False) as browser:
         print("✅ Browser launched successfully!")
         print(f"   Browser type: {browser.context.browser.browser_type.name}")
 
