@@ -207,11 +207,11 @@ docs/                           # Reports, plans, comparisons
 
 ## 🔗 Learn More
 
-* Predicate SDK (Python): [https://github.com/PredicateLabs/predicatelabs](https://github.com/PredicateLabs/predicatelabs)
-* Predicate SDK (TS): [https://github.com/PredicateLabs/sentience-ts](https://github.com/PredicateLabs/sentience-ts)
-* Demo Site: [https://sentience-sdk-playground.vercel.app](https://sentience-sdk-playground.vercel.app)
+* Predicate SDK (Python): [https://github.com/Predicate-Labs/sdk-python](https://github.com/Predicate-Labs/sdk-python)
+* Predicate SDK (TS): [https://github.com/Predicate-Labs/sdk-typescript](https://github.com/Predicate-Labs/sdk-typescript)
+* Demo Site: [https://www.localllamaland.com](https://www.localllamaland.com)
 * Docs: [https://predicatelabs.dev/docs](https://predicatelabs.dev/docs)
-* Issues: [https://github.com/PredicateLabs/sentience-sdk-playground/issues](https://github.com/PredicateLabs/sentience-sdk-playground/issues)
+* Issues: [https://github.com/PredicateLabs/sentience-sdk-playground/issues](https://github.com/Predicate-Labs/sentience-sdk-playground/issues?q=sort%3Aupdated-desc%20is%3Aissue)
 
 ---
 
