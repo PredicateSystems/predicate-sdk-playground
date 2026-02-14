@@ -12,18 +12,24 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from moviepy.editor import ImageClip, concatenate_videoclips
+try:
+    # Optional dependency: only required when stitching screenshots into a video.
+    # pylint: disable=import-error
+    from moviepy.editor import ImageClip, concatenate_videoclips
+except Exception:  # pragma: no cover
+    ImageClip = None  # type: ignore[assignment]
+    concatenate_videoclips = None  # type: ignore[assignment]
 from PIL import Image, ImageDraw, ImageFont
 
 
-def add_token_overlay(image_path: str, token_count: int, scene_name: str) -> str:
+def add_token_overlay(image_path: str, token_count: int, _scene_name: str) -> str:
     """
     Add token usage overlay to an image using PIL.
 
     Args:
         image_path: Path to the original image
         token_count: Number of tokens used
-        scene_name: Name of the scene (unused but kept for API compatibility)
+        _scene_name: Name of the scene (unused but kept for API compatibility)
 
     Returns:
         Path to the new image with overlay
@@ -101,6 +107,12 @@ def create_demo_video(screenshots_dir: str, token_summary: Dict[str, Any], outpu
         print(f"No screenshots found in {screenshots_dir}")
         return
 
+    if ImageClip is None or concatenate_videoclips is None:
+        raise RuntimeError(
+            "moviepy is required to stitch screenshots into a video. "
+            "Install it in the playground venv to enable create_demo_video()."
+        )
+
     print(f"Found {len(screenshot_files)} screenshots")
     clips = []
 
@@ -115,6 +127,7 @@ def create_demo_video(screenshots_dir: str, token_summary: Dict[str, Any], outpu
                 break
 
         if scene_tokens > 0:
+            # scene_name is unused (kept for API compatibility)
             img_path = add_token_overlay(img_path, scene_tokens, screenshot_file)
 
         duration = 3.0
@@ -122,13 +135,25 @@ def create_demo_video(screenshots_dir: str, token_summary: Dict[str, Any], outpu
 
     final_video = concatenate_videoclips(clips, method="compose")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    final_video.write_videofile(
-        output_path,
-        fps=30,
-        codec="libx264",
-        audio=False,
-        preset="medium",
-        logger=None,
-    )
-    print(f"\n✅ Video created: {output_path}")
+    try:
+        final_video.write_videofile(
+            output_path,
+            fps=30,
+            codec="libx264",
+            audio=False,
+            preset="medium",
+            logger=None,
+        )
+        print(f"\n✅ Video created: {output_path}")
+    finally:
+        # Best-effort cleanup: moviepy can keep resources/processes alive if clips aren't closed.
+        try:
+            final_video.close()
+        except Exception:
+            pass
+        for c in clips:
+            try:
+                c.close()
+            except Exception:
+                pass
 
