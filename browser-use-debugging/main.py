@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import builtins as _builtins
 import inspect
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -29,6 +31,49 @@ except ImportError:
     # Optional dependency: the demo can still run if env vars are set another way.
     def load_dotenv(*_args, **_kwargs):  # type: ignore
         return False
+
+
+# ---------------------------------------------------------------------
+# Demo logging: add elapsed timestamps to "[demo]" lines
+#
+# We prefer an "elapsed since video/session start" style timestamp so it's easy
+# to align logs with recorded video playback.
+# ---------------------------------------------------------------------
+
+_DEMO_T0 = time.monotonic()
+
+
+def _set_demo_time_origin() -> None:
+    global _DEMO_T0
+    _DEMO_T0 = time.monotonic()
+
+
+def _demo_elapsed_ts() -> str:
+    s = max(0.0, time.monotonic() - _DEMO_T0)
+    m = int(s // 60)
+    sec = s - m * 60
+    # mm:ss.mmm
+    return f"{m:02d}:{sec:06.3f}"
+
+
+def print(*args, **kwargs):  # type: ignore[override]
+    """
+    Local print wrapper for this demo.
+
+    - If the rendered message starts with "[demo]", rewrite it to:
+      "[demo +MM:SS.mmm]"
+    - Otherwise, pass through unchanged.
+    """
+    sep = kwargs.pop("sep", " ")
+    end = kwargs.pop("end", "\n")
+    file = kwargs.pop("file", None)
+    flush = kwargs.pop("flush", False)
+
+    msg = sep.join(str(a) for a in args)
+    if msg.startswith("[demo]"):
+        msg = msg.replace("[demo]", f"[demo +{_demo_elapsed_ts()}]", 1)
+
+    _builtins.print(msg, sep="", end=end, file=file, flush=flush, **kwargs)
 
 # Allow running from the monorepo without pip-installing the SDK.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -44,7 +89,12 @@ if _BROWSER_USE_DEV.exists():
     sys.path.insert(0, str(_BROWSER_USE_DEV))
 
 from predicate import PredicateDebugger, get_extension_dir
-from predicate.agent_runtime import AgentRuntime
+from predicate.integrations.browser_use import (
+    PredicateBrowserUsePlugin,
+    PredicateBrowserUsePluginConfig,
+    PredicateBrowserUseVerificationError,
+    StepCheckSpec,
+)
 from predicate.models import SnapshotOptions
 from predicate.tracer_factory import create_tracer
 from predicate.verification import any_of, custom, exists, url_contains
@@ -1014,6 +1064,9 @@ async def main() -> None:
     profile_kwargs = _maybe_make_browser_profile_kwargs(record_video_dir=str(video_dir))
     profile = BrowserProfile(**profile_kwargs)
     session = BrowserSession(browser_profile=profile)
+    # Reset demo log time origin as close as possible to video/session start,
+    # so log timestamps align with the recorded video duration.
+    _set_demo_time_origin()
     await session.start()
     await debug_print_browser_info(session)
     # Now that browser-use has set user_data_dir, we can inspect the real launch args.
@@ -1060,8 +1113,9 @@ async def main() -> None:
     # Use PredicateContext.build() like the working integration does
     # This uses BrowserUseAdapter internally
     print("[demo] Testing PredicateContext.build() (like working integration)...", flush=True)
-    from predicate.backends.sentience_context import SentienceContext
-    sentience_ctx = SentienceContext(
+    from predicate.backends import PredicateContext
+
+    sentience_ctx = PredicateContext(
         predicate_api_key=predicate_api_key,
         use_api=True,
         max_elements=60,
@@ -1087,18 +1141,41 @@ async def main() -> None:
         import traceback
         traceback.print_exc()
 
-    # Now create the debugger using browser-use's CDP backend directly
-    print("[demo] Creating AgentRuntime via BrowserUseAdapter...", flush=True)
-    try:
-        adapter = BrowserUseAdapter(session)
-        backend = await asyncio.wait_for(adapter.create_backend(), timeout=30.0)
-        print("[demo] Backend created successfully!", flush=True)
-        cdp_backend_created = True
+    # Create the Predicate browser-use plugin (single wiring point).
+    #
+    # This replaces the ad-hoc: BrowserUseAdapter → AgentRuntime → PredicateDebugger setup.
+    print("[demo] Creating PredicateBrowserUsePlugin...", flush=True)
+    # In DEMO_MODE=fail we inject an intentional failing required check as a per-step auto_check.
+    # This demonstrates the key contrast: browser-use can return "done", but deterministic verification can still fail.
+    per_step_checks = [
+        StepCheckSpec(
+            predicate=any_of(
+                url_contains("dw.com"),
+                exists("text~'DW'"),
+                exists("text~'News'"),
+            ),
+            label="on_dw_homepage",
+            required=True,
+            eventually=True,
+            timeout_s=6.0,
+        )
+    ]
+    if DEMO_MODE == "fail":
+        per_step_checks = [
+            StepCheckSpec(
+                predicate=custom(lambda _ctx: False, "demo_intentional_failure"),
+                label="demo_fail_required_check",
+                required=True,
+                eventually=False,
+            )
+        ]
 
-        runtime = AgentRuntime(
-            backend=backend,
-            tracer=tracer,
+    plugin = PredicateBrowserUsePlugin(
+        config=PredicateBrowserUsePluginConfig(
             predicate_api_key=predicate_api_key,
+            use_api=True,
+            wait_for_extension_ms=10_000,
+            tracer=tracer,
             snapshot_options=SnapshotOptions(
                 use_api=True,
                 limit=100,
@@ -1107,15 +1184,28 @@ async def main() -> None:
                 goal="browser-use-debug-demo",
                 predicate_api_key=predicate_api_key,
             ),
+            auto_snapshot_each_step=True,
+            auto_checks_each_step=True,
+            auto_checks=per_step_checks,
+            on_failure="raise",
         )
-        dbg = PredicateDebugger(runtime=runtime)
-        print("[demo] PredicateDebugger created via browser-use CDP!", flush=True)
-
-    except Exception as adapter_err:
-        print(f"[demo] BrowserUseAdapter.create_backend() failed: {type(adapter_err).__name__}: {adapter_err}", flush=True)
+    )
+    try:
+        await asyncio.wait_for(plugin.bind(browser_session=session), timeout=30.0)
+        dbg = plugin.dbg
+        if dbg is None:
+            raise RuntimeError("plugin.dbg is None after bind()")
+        cdp_backend_created = True
+        print("[demo] PredicateBrowserUsePlugin bound successfully!", flush=True)
+    except Exception as plugin_err:
+        print(
+            f"[demo] PredicateBrowserUsePlugin.bind() failed: {type(plugin_err).__name__}: {plugin_err}",
+            flush=True,
+        )
         import traceback
+
         traceback.print_exc()
-        raise RuntimeError(f"Could not create CDP backend: {adapter_err}")
+        raise RuntimeError(f"Could not bind Predicate browser-use plugin: {plugin_err}")
 
     # Get browser-use Page for screenshots
     page = await session.get_current_page()
@@ -1445,18 +1535,30 @@ async def main() -> None:
 
         if callable(step_fn):
             for i in range(max_steps):
-                async with dbg.step(f"browser-use step {i}", step_index=2 + i):
+                # Run Predicate verification around each Browser Use step.
+                # (Browser Use doesn't expose hooks for step(), so we invoke them manually.)
+                await plugin.on_step_start(agent)
+                try:
                     # Make it obvious where we stop if browser-use exits/crashes.
-                    await dbg.record_action(f"about_to_call_browser_use.step({i})", url=await page_get_url(page))
+                    await dbg.record_action(
+                        f"about_to_call_browser_use.step({i})", url=await page_get_url(page)
+                    )
                     # Hard timeout: prevent the demo from hanging forever (e.g., stuck 'evaluate' tool).
                     res = await await_with_timeout(
                         f"browser_use.step({i})",
                         step_fn(),
                         timeout_s=float(os.getenv("BROWSER_USE_STEP_TIMEOUT_S", "45")),
                     )
-                    await dbg.record_action(f"browser_use.step({i}) returned", url=await page_get_url(page))
+                    await dbg.record_action(
+                        f"browser_use.step({i}) returned", url=await page_get_url(page)
+                    )
                     agent_final = res
-                    await dbg.record_action(f"browser_use.step() -> {res!r}", url=await page_get_url(page))
+                    await dbg.record_action(
+                        f"browser_use.step() -> {res!r}", url=await page_get_url(page)
+                    )
+                finally:
+                    # Auto snapshot + deterministic checks happen here (per plugin config).
+                    await plugin.on_step_end(agent)
 
                     # Check if agent signals task completion
                     # browser-use Agent has is_done() method or done attribute
@@ -1496,49 +1598,8 @@ async def main() -> None:
                         print(f"[demo] post-step url sync: browser_use_url={bu_url!r} playwright_url={pw_url!r}", flush=True)
                     except Exception:
                         pass
-                    # Ensure Sentience is ready after the step.
-                    #
-                    # - In Playwright-attached mode: wait for injection on the Playwright page (document changes).
-                    # - In pure browser-use CDP mode (default for this demo): don't do Playwright waits at all.
-                    if pw_browser is not None:
-                        try:
-                            await await_with_timeout(
-                                f"wait_for_predicate_after_step({i})",
-                                ensure_predicate_injected_on_playwright_page(page, timeout_s=30),
-                                timeout_s=35,
-                            )
-                        except TimeoutError:
-                            print(
-                                f"[demo] wait_for_predicate_after_step({i}) timed out in Playwright; "
-                                "switching dbg backend to browser-use CDP for snapshots",
-                                flush=True,
-                            )
-                            await _fallback_to_browser_use_backend(session, dbg)
-                    else:
-                        try:
-                            await await_with_timeout(
-                                f"wait_for_predicate_after_step({i})",
-                                wait_for_predicate_extension_ready(dbg.runtime.backend, timeout_s=10),  # type: ignore[arg-type]
-                                timeout_s=12,
-                            )
-                        except Exception as e:
-                            print(
-                                f"[demo] wait_for_predicate_after_step({i}) backend-ready check failed: {type(e).__name__}: {e}",
-                                flush=True,
-                            )
-                    await dbg.snapshot(
-                        goal=f"verify:after_step_{i}",
-                        use_api=True,
-                        limit=100,
-                        show_overlay=True,
-                    )
-
-                    on_dw = any_of(
-                        url_contains("dw.com"),
-                        exists("text~'DW'"),
-                        exists("text~'News'"),
-                    )
-                    await dbg.check(on_dw, label="on_dw_homepage").eventually(timeout_s=6)
+                    # NOTE: We previously did explicit extension-ready waits + post-step snapshots
+                    # here. That logic is now centralized in the plugin hook(s).
 
                     p = screenshots_dir / f"scene{2+i}_{_safe_filename(f'after_step_{i}')}.png"
                     await page_screenshot(page, path=str(p), full_page=False)
@@ -1548,19 +1609,31 @@ async def main() -> None:
                         print(f"[demo] Agent signaled task completion at step {i}", flush=True)
                         break
         elif callable(run_fn):
-            async with dbg.step("browser-use run()", step_index=1):
-                await dbg.record_action("browser_use.run()", url=await page_get_url(page))
+            await dbg.record_action("browser_use.run()", url=await page_get_url(page))
+            # Prefer native Browser Use hook support (agent.run accepts on_step_start/on_step_end).
+            res = None
+            try:
+                sig = inspect.signature(run_fn)
+                allowed = set(sig.parameters.keys())
+                run_kwargs = {}
+                if "on_step_start" in allowed:
+                    run_kwargs["on_step_start"] = plugin.on_step_start
+                if "on_step_end" in allowed:
+                    run_kwargs["on_step_end"] = plugin.on_step_end
+                res = await run_fn(**run_kwargs)
+            except Exception:
+                # Fall back to no-hook run; plugin can still be used explicitly post-run.
                 res = await run_fn()
-                agent_final = res
-                # This is the "vision agent claims success" moment: browser-use returns without throwing.
-                await dbg.record_action(f"browser_use.run() -> {res!r}", url=await page_get_url(page))
-                await dbg.record_action(
-                    "agent_claimed_success=true (finished without deterministic verification)",
-                    url=await page_get_url(page),
-                )
-                await snap_and_check("post_run")
-                p = screenshots_dir / f"scene2_{_safe_filename('post_run')}.png"
-                await page_screenshot(page, path=str(p), full_page=False)
+            agent_final = res
+            # This is the "vision agent claims success" moment: browser-use returns without throwing.
+            await dbg.record_action(f"browser_use.run() -> {res!r}", url=await page_get_url(page))
+            await dbg.record_action(
+                "agent_claimed_success=true (finished without deterministic verification)",
+                url=await page_get_url(page),
+            )
+            await snap_and_check("post_run")
+            p = screenshots_dir / f"scene2_{_safe_filename('post_run')}.png"
+            await page_screenshot(page, path=str(p), full_page=False)
         else:
             raise RuntimeError("browser-use Agent has neither .step() nor .run()")
 
@@ -1583,19 +1656,18 @@ async def main() -> None:
 
             await dbg.record_action(f"agent_final={agent_final!r}", url=await page_get_url(page))
 
-            # In DEMO_MODE=fail we intentionally inject a failing check
-            if DEMO_MODE == "fail":
-                dbg.check(
-                    custom(lambda _ctx: False, "demo_intentional_failure"),
-                    label="task_complete",
-                    required=True,
-                ).once()
-            else:
-                dbg.check(
-                    custom(_on_dw_with_news, "on_dw_homepage"),
-                    label="task_complete",
-                    required=True,
-                ).once()
+            ok = dbg.check(
+                custom(_on_dw_with_news, "on_dw_homepage"),
+                label="task_complete",
+                required=True,
+            ).once()
+
+            # Make demo behavior explicit:
+            # - We still fail-fast if the required completion predicate does not pass.
+            if not ok:
+                raise RuntimeError(
+                    f"Deterministic verification failed: task_complete (DEMO_MODE={DEMO_MODE})"
+                )
 
             # Also persist task output to a JSON file
             try:
@@ -1626,6 +1698,11 @@ async def main() -> None:
         if persisted:
             print(f"[video] persisted Playwright recording to: {persisted}")
 
+    except PredicateBrowserUseVerificationError as e:
+        # Demo-friendly failure mode: print a clear reason and exit cleanly (no traceback).
+        # The `finally` block will still run and persist artifacts (trace upload, video, etc.).
+        print(f"[demo] FATAL: {type(e).__name__}: {e}")
+        return
     except BaseException as e:
         # IMPORTANT: browser-use (or its deps) can raise SystemExit in some failure modes.
         # Catch BaseException so we can print a clear reason instead of "stopping abruptly".
@@ -1636,8 +1713,17 @@ async def main() -> None:
             pass
         raise
     finally:
+        # IMPORTANT:
+        # browser-use BrowserSession does not guarantee a `.close()` method, and leaving the
+        # session/event bus running can keep the Python process alive after main() finishes.
+        # Prefer `kill()` (stop browser process) and fall back to `stop()` (graceful cleanup).
         try:
-            await session.close()
+            kill_fn = getattr(session, "kill", None)
+            stop_fn = getattr(session, "stop", None)
+            if callable(kill_fn):
+                await kill_fn()
+            elif callable(stop_fn):
+                await stop_fn()
         except Exception:
             pass
         try:
@@ -1661,6 +1747,23 @@ async def main() -> None:
                 print(f"[warn] video stitching failed: {e}")
         else:
             print("[video] moviepy not installed; skipping screenshot stitching")
+
+        # If any non-daemon threads are still alive, the process may hang even after main() returns.
+        # This can happen with some video/recording stacks. Since this is a playground demo,
+        # prefer a clean exit over requiring Ctrl+C.
+        try:
+            non_daemon = [
+                t
+                for t in threading.enumerate()
+                if t.is_alive() and (not t.daemon) and t.name != "MainThread"
+            ]
+            if non_daemon:
+                names = ", ".join(f"{t.name}" for t in non_daemon[:8])
+                print(f"[demo] WARNING: non-daemon threads still alive ({len(non_daemon)}): {names}")
+                print("[demo] Forcing process exit to avoid hang.")
+                os._exit(0)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
