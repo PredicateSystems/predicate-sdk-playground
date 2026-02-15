@@ -50,7 +50,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # Install Predicate SDK
-pip install predicatelabs
+pip install predicate-sdk
 
 # Install Playwright browsers
 playwright install chromium

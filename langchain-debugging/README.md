@@ -47,7 +47,7 @@ This keeps the Studio timeline intuitive: navigation verifies domain; the entry 
 From repo root (recommended: use your existing playground venv):
 
 ```bash
-pip install predicatelabs langchain langchain-openai langgraph playwright python-dotenv moviepy pillow
+pip install predicate-sdk langchain langchain-openai langgraph playwright python-dotenv moviepy pillow
 playwright install chromium
 ```
 

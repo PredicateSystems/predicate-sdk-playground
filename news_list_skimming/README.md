@@ -25,7 +25,7 @@ pip install -r requirements.txt
 pip install -r news_list_skimming/requirements.txt
 
 # Install Predicate SDK
-pip install predicatelabs
+pip install predicate-sdk
 
 # Install Playwright browsers
 playwright install chromium
