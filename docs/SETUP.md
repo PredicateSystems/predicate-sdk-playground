@@ -128,7 +128,7 @@ playwright install chromium
 - **playwright**: Browser automation (1.41.0)
 - **moviepy**: Video generation (1.0.3) ⚠️ Version 1.x required!
 - **Pillow**: Image processing (10.2.0)
-- **predicatelabs**: SDK (installed from parent directory)
+- **predicate-sdk**: SDK (installed from parent directory)
 
 ### System Dependencies:
 - **ImageMagick**: Text rendering for MoviePy
