@@ -1057,7 +1057,7 @@ async def main() -> None:
     except ImportError as e:
         raise SystemExit(
             "browser-use is required.\n"
-            "Install: pip install \"predicatelabs[browser-use]\"\n"
+            "Install: pip install \"predicate-sdk[browser-use]\"\n"
             f"ImportError: {e}"
         ) from e
 
