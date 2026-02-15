@@ -1,6 +1,6 @@
 # browser-use + Predicate deterministic verification (Playground Demo)
 
-This demo shows how to use the **browser-use plugin** built into `sdk-python` (PyPI package: `predicatelabs`) to attach **deterministic verification** to a browser-use agent.
+This demo shows how to use the **browser-use plugin** built into `sdk-python` (PyPI package: `predicate-sdk`) to attach **deterministic verification** to a browser-use agent.
 
 At a high level, `PredicateBrowserUsePlugin` wires up `AgentRuntime` + `PredicateDebugger` *as a verification + trace sidecar* around your Browser Use steps, with:
 - **Per-step verification** (fail-fast on drift)
@@ -107,7 +107,7 @@ print("Final:", result)
 From repo root (recommended: use your existing playground venv):
 
 ```bash
-pip install "predicatelabs[browser-use]" python-dotenv moviepy pillow
+pip install "predicate-sdk[browser-use]" python-dotenv moviepy pillow
 playwright install chromium
 ```
 

@@ -3,8 +3,8 @@
 This guide demonstrates how to use the Predicate Python SDK to automate shopping on Amazon.
 
 ## Prerequisites
-* install the `predicatelabs` sdk:
-`pip install predicatelabs`
+* install the `predicate-sdk` package:
+`pip install predicate-sdk`
 
 * install playwright with chromium support:
 ```bash
