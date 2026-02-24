@@ -1,5 +1,5 @@
 # Core dependencies
-predicate-sdk
+predicate-runtime
 python-dotenv
 
 # LLM dependencies
