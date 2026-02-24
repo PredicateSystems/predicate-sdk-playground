@@ -13,4 +13,5 @@ accelerate>=0.30.0
 pillow>=10.0.0
 # Optional (Apple Silicon, quantized vision): install if using MLXVLMProvider
 # mlx-vlm>=0.1.0
+predicate-runtime>=1.1.2
 
