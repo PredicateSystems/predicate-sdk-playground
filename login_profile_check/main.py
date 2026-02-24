@@ -1,7 +1,7 @@
 """
 Demo 3: Login + Profile Check on Local Llama Land
 
-This demo navigates to a fake Next.js site (https://sentience-sdk-playground.vercel.app/login)
+This demo navigates to a fake Next.js site (https://www.localllamaland.com/login)
 that is designed to test agent robustness with realistic JS-heavy patterns.
 
 Site Characteristics (intentional challenges):
@@ -190,7 +190,7 @@ async def main() -> None:
         goal=task_goal,
         agent_type="public_build/login_profile_check",
         llm_model=local_text_model,
-        start_url="https://sentience-sdk-playground.vercel.app/login",
+        start_url="https://www.localllamaland.com/login",
     )
     tracer.emit_run_start(agent="LoginProfileCheckDemo", llm_model=local_text_model, config={})
 
@@ -327,7 +327,7 @@ async def main() -> None:
         # Step 1: Navigate to login page and wait for hydration
         # -------------------------
         async def step1(_step_id: str):
-            await browser.goto("https://sentience-sdk-playground.vercel.app/login")
+            await browser.goto("https://www.localllamaland.com/login")
             await browser.page.wait_for_load_state("domcontentloaded", timeout=10_000)
 
             # Debug: print current URL from browser

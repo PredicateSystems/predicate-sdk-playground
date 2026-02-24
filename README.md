@@ -155,18 +155,18 @@ See `docs/DEMO_REPORTS.md` for full metrics and results.
 ## 🚀 Quick Start
 
 ```bash
-git clone https://github.com/predicate-labs/predicate-sdk-playground
+git clone https://github.com/Predicate-Labs/sentience-sdk-playground
 cd sentience-sdk-playground
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-pip install predicate-sdk
+pip install predicate-runtime
 playwright install chromium
 ```
 
 ### SDK-Python Rename Note
 
 - The Python package name previously changed from `sentienceapi` to `predicatelabs` (2026-02-10).
-- The distribution name is now `predicate-sdk` for new PyPI installs.
+- The distribution name is now `predicate-runtime` for new PyPI installs.
 - Canonical imports are now from `predicate` (for example `from predicate import PredicateBrowser, AsyncPredicateBrowser, PredicateDebugger`).
 - Canonical API key env var and parameter names are `PREDICATE_API_KEY` and `predicate_api_key`.
 
@@ -211,7 +211,7 @@ docs/                           # Reports, plans, comparisons
 * Predicate SDK (TS): [https://github.com/Predicate-Labs/sdk-typescript](https://github.com/Predicate-Labs/sdk-typescript)
 * Demo Site: [https://www.localllamaland.com](https://www.localllamaland.com)
 * Docs: [https://predicatelabs.dev/docs](https://predicatelabs.dev/docs)
-* Issues: [https://github.com/predicate-labs/predicate-sdk-playground/issues](https://github.com/Predicate-Labs/sentience-sdk-playground/issues?q=sort%3Aupdated-desc%20is%3Aissue)
+* Issues: [https://github.com/Predicate-Labs/sentience-sdk-playground/issues](https://github.com/Predicate-Labs/sentience-sdk-playground/issues?q=sort%3Aupdated-desc%20is%3Aissue)
 
 ---
 
