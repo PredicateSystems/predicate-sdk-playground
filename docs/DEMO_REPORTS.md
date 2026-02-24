@@ -115,7 +115,7 @@ Fallback remains available for cases where LLM genuinely cannot understand page 
 ### D. Reproduction Steps
 
 **Prerequisites**:
-1. Install: `pip install -r requirements.txt && pip install predicate-sdk`
+1. Install: `pip install -r requirements.txt && pip install predicate-runtime`
 2. Get API key: [predicatelabs.dev](https://predicatelabs.dev) (free tier available)
 3. Set `PREDICATE_API_KEY` in `.env` or environment
 
@@ -129,4 +129,4 @@ snapshot_options = SnapshotOptions(show_overlay=True, goal="Your task goal here"
 
 **View Traces**: [Predicate Studio](https://predicatelabs.dev/studio) for replay and debugging (login required).
 
-**Help**: [GitHub Issues](https://github.com/predicate-labs/predicate-sdk-playground/issues) | [Documentation](https://predicatelabs.dev/docs)
+**Help**: [GitHub Issues](https://github.com/Predicate-Labs/sentience-sdk-playground/issues) | [Documentation](https://predicatelabs.dev/docs)

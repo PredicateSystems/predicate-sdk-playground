@@ -1086,7 +1086,7 @@ class RobustLocalLLMAgent(LocalLLMWebAgent):
 
 ```bash
 # Core dependencies
-pip install predicate-sdk
+pip install predicate-runtime
 pip install transformers accelerate torch
 
 # Optional: For quantization
