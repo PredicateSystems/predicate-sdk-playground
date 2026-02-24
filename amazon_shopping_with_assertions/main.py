@@ -151,7 +151,7 @@ async def main() -> None:
                 f"[warn] Using sentience from site-packages: {_predicate.__file__}\n"
                 f"       Python: {sys.executable}\n"
                 f"       If you expected the monorepo SDK, activate the demo venv and run:\n"
-                f"         pip install predicate-sdk\n",
+                f"         pip install predicate-runtime\n",
                 flush=True,
             )
     except Exception:

@@ -88,7 +88,7 @@ This installs:
 - `torch` - Deep learning
 - `accelerate` - GPU acceleration
 - `bitsandbytes` - Memory optimization
-- `predicate-sdk` - SDK
+- `predicate-runtime` - SDK
 - `openai` - For comparison (optional)
 
 ### Step 3: Verify Setup
