@@ -82,6 +82,118 @@ class LlmResult:
     total_tokens: int
 
 
+# ---------------------------------------------------------------------------
+# Config: PlannerExecutorConfig (matches design doc + webbench reference)
+# ---------------------------------------------------------------------------
+@dataclass
+class PlannerExecutorConfig:
+    """
+    Configuration for Planner + Executor agent.
+
+    Based on docs/PLANNER_EXECUTOR_DESIGN.md and webbench/webbench/agents/planner_executor_agent.py.
+
+    Key features:
+    - Incremental limit escalation (initial_limit -> max_limit with limit_step increments)
+    - Vision fallback configuration
+    - Retry settings for verification
+    """
+
+    # Snapshot limit escalation settings (from design doc RetryConfig)
+    snapshot_limit_base: int = 60
+    snapshot_limit_max: int = 200
+    snapshot_limit_step: int = 30
+
+    # Retry configuration
+    verify_timeout_s: float = 10.0
+    verify_poll_s: float = 0.5
+    verify_max_attempts: int = 5
+    executor_repair_attempts: int = 2
+
+    # Vision fallback
+    vision_fallback_enabled: bool = True
+    max_vision_calls: int = 3
+
+    # Planner settings
+    planner_max_tokens: int = 2048
+    planner_repair_attempts: int = 3
+
+    # Executor settings
+    executor_max_tokens: int = 96
+
+    # Stabilization (post-action wait for DOM to settle)
+    stabilize_enabled: bool = True
+    stabilize_poll_s: float = 0.35
+    stabilize_max_attempts: int = 6
+
+
+# ---------------------------------------------------------------------------
+# SnapshotContext: Shared page state between Planner and Executor
+# ---------------------------------------------------------------------------
+@dataclass
+class SnapshotContext:
+    """
+    Shared page state between Planner and Executor to avoid redundant captures.
+
+    Based on docs/PLANNER_EXECUTOR_DESIGN.md Section 3.
+    """
+
+    snapshot: Snapshot
+    compact_representation: str
+    screenshot_base64: str | None
+    captured_at: datetime
+    limit_used: int
+    snapshot_success: bool = True
+    requires_vision: bool = False
+
+    def is_stale(self, max_age_seconds: float = 5.0) -> bool:
+        """Check if snapshot is too old to reuse."""
+        return (datetime.now() - self.captured_at).total_seconds() > max_age_seconds
+
+    def should_use_vision(self) -> bool:
+        """Check if executor should skip snapshot and use vision directly."""
+        return not self.snapshot_success or self.requires_vision
+
+
+def detect_snapshot_failure(snap: Snapshot) -> tuple[bool, str | None]:
+    """
+    Detect if snapshot is unusable and should trigger vision fallback.
+
+    Based on docs/PLANNER_EXECUTOR_DESIGN.md Section 4.
+
+    Returns:
+        (should_use_vision, reason)
+    """
+    # Check explicit status field (tri-state: success, error, require_vision)
+    status = getattr(snap, "status", "success")
+    if status == "require_vision":
+        return True, "require_vision"
+
+    if status == "error":
+        error = getattr(snap, "error", None)
+        return True, f"snapshot_error:{error}"
+
+    # Check diagnostics if available
+    diag = getattr(snap, "diagnostics", None)
+    if diag:
+        # Low confidence indicates unreliable snapshot
+        confidence = getattr(diag, "confidence", 1.0)
+        if confidence is not None and float(confidence) < 0.3:
+            return True, "low_confidence"
+
+        # Canvas-heavy pages need vision
+        has_canvas = getattr(diag, "has_canvas", False)
+        elements = getattr(snap, "elements", []) or []
+        if has_canvas and len(elements) < 5:
+            return True, "canvas_page"
+
+    # Very few elements usually indicates a problem
+    elements = getattr(snap, "elements", []) or []
+    if len(elements) < 3:
+        return True, "too_few_elements"
+
+    return False, None
+
+
 def now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1197,22 +1309,163 @@ def build_predicate(spec: dict[str, Any]):
 
 
 async def apply_verifications(
-    runtime: AgentRuntime, verify: list[dict[str, Any]], required: bool
+    runtime: AgentRuntime, verify: list[dict[str, Any]], required: bool,
+    config: PlannerExecutorConfig | None = None
 ) -> bool:
+    """
+    Apply predicate-based verifications with incremental limit escalation.
+
+    Based on docs/PLANNER_EXECUTOR_DESIGN.md Section 4: Incremental Limit Escalation.
+
+    If verification fails, we retry with progressively larger snapshot limits:
+    - initial_limit (e.g., 60) -> +step (e.g., 90) -> +step (e.g., 120) -> ... -> max_limit (e.g., 200)
+
+    This helps find elements that may be outside the initial snapshot window.
+    """
     if not verify:
         return True
+
+    # Use defaults if config not provided
+    cfg = config or PlannerExecutorConfig()
+
     ok_all = True
     for idx, v in enumerate(verify, start=1):
         pred = build_predicate(v)
         label = v.get("label") or f"verify_{idx}"
+
         if required:
-            ok = await runtime.check(pred, label=label, required=True).eventually(
-                timeout_s=8.0, poll_s=0.5, max_snapshot_attempts=8
-            )
+            # Incremental limit escalation for required verifications
+            current_limit = cfg.snapshot_limit_base
+            attempt = 0
+
+            while current_limit <= cfg.snapshot_limit_max:
+                attempt += 1
+                # Update snapshot limit via options if possible
+                opts = getattr(runtime, "snapshot_options", None)
+                if opts is not None:
+                    opts.limit = current_limit
+
+                ok = await runtime.check(pred, label=label, required=True).eventually(
+                    timeout_s=cfg.verify_timeout_s,
+                    poll_s=cfg.verify_poll_s,
+                    max_snapshot_attempts=cfg.verify_max_attempts
+                )
+
+                if ok:
+                    break
+
+                # Escalate limit for next attempt
+                if current_limit < cfg.snapshot_limit_max:
+                    print(
+                        f"  [verify] Escalating snapshot limit: {current_limit} -> {min(current_limit + cfg.snapshot_limit_step, cfg.snapshot_limit_max)} "
+                        f"(predicate={v.get('predicate')})",
+                        flush=True,
+                    )
+                    current_limit = min(current_limit + cfg.snapshot_limit_step, cfg.snapshot_limit_max)
+                else:
+                    break
+
+            ok_all = ok_all and bool(ok)
         else:
             ok = runtime.assert_(pred, label=label, required=False)
-        ok_all = ok_all and bool(ok)
+            ok_all = ok_all and bool(ok)
+
     return ok_all
+
+
+async def snapshot_with_escalation(
+    runtime: AgentRuntime,
+    ctx_formatter: Any,
+    goal: str,
+    config: PlannerExecutorConfig | None = None,
+    capture_screenshot: bool = False,
+) -> SnapshotContext:
+    """
+    Capture snapshot with incremental limit escalation and vision fallback detection.
+
+    Based on docs/PLANNER_EXECUTOR_DESIGN.md Section 3 (SnapshotContext) and
+    webbench/webbench/agents/planner_executor_agent.py (_snapshot_with_ramp).
+
+    Returns:
+        SnapshotContext with snapshot, compact representation, and vision fallback flags.
+    """
+    cfg = config or PlannerExecutorConfig()
+    current_limit = cfg.snapshot_limit_base
+    last_snap: Snapshot | None = None
+    last_compact: str = ""
+    screenshot_b64: str | None = None
+    requires_vision = False
+    vision_reason: str | None = None
+
+    while current_limit <= cfg.snapshot_limit_max:
+        try:
+            snap = await runtime.snapshot(
+                limit=current_limit,
+                screenshot=capture_screenshot,
+                goal=goal
+            )
+            if snap is None:
+                print(f"  [snapshot] Got None at limit={current_limit}", flush=True)
+                current_limit = min(current_limit + cfg.snapshot_limit_step, cfg.snapshot_limit_max + 1)
+                continue
+
+            last_snap = snap
+
+            # Check if snapshot indicates vision fallback needed
+            needs_vision, reason = detect_snapshot_failure(snap)
+            if needs_vision:
+                requires_vision = True
+                vision_reason = reason
+                print(f"  [snapshot] Vision fallback needed: {reason}", flush=True)
+                # Still return the snapshot, but flag it for vision
+                break
+
+            # Generate compact representation
+            compact = ctx_formatter._format_snapshot_for_llm(snap)
+            last_compact = compact
+
+            # Check if we have enough elements
+            elements = getattr(snap, "elements", []) or []
+            if len(elements) >= 10:  # Reasonable threshold
+                break
+
+            # Escalate if we got too few elements
+            if current_limit < cfg.snapshot_limit_max:
+                print(
+                    f"  [snapshot] Low element count ({len(elements)}), escalating: {current_limit} -> {current_limit + cfg.snapshot_limit_step}",
+                    flush=True,
+                )
+                current_limit = min(current_limit + cfg.snapshot_limit_step, cfg.snapshot_limit_max)
+            else:
+                break
+
+        except Exception as exc:
+            print(f"  [snapshot] Error at limit={current_limit}: {exc}", flush=True)
+            current_limit = min(current_limit + cfg.snapshot_limit_step, cfg.snapshot_limit_max + 1)
+
+    # Fallback: return empty context if no snapshot obtained
+    if last_snap is None:
+        # Create a minimal Snapshot to indicate failure
+        last_snap = Snapshot(
+            status="error",
+            elements=[],
+            url="",
+            title="",
+            error="snapshot_capture_failed"
+        )
+        requires_vision = True
+        vision_reason = "snapshot_capture_failed"
+        print(f"  [snapshot] {vision_reason}", flush=True)
+
+    return SnapshotContext(
+        snapshot=last_snap,
+        compact_representation=last_compact,
+        screenshot_base64=screenshot_b64,
+        captured_at=datetime.now(),
+        limit_used=current_limit,
+        snapshot_success=not requires_vision,
+        requires_vision=requires_vision,
+    )
 
 
 def _is_str_list(value: Any) -> bool:
@@ -2311,6 +2564,305 @@ async def maybe_run_optional_substeps(
             feedback_path,
             run_id,
         )
+
+# ---------------------------------------------------------------------------
+# PlannerExecutorAgent: Unified orchestrator for Planner + Executor pattern
+# ---------------------------------------------------------------------------
+class PlannerExecutorAgent:
+    """
+    Two-tier agent architecture with Planner (7B+) and Executor (3B-7B) models.
+
+    Based on docs/PLANNER_EXECUTOR_DESIGN.md:
+    - Planner generates JSON plan with steps and predicates
+    - Executor executes each step with snapshot-first approach
+    - Supports incremental limit escalation and vision fallback
+    - SnapshotContext sharing between planning and execution phases
+
+    Example usage:
+        agent = PlannerExecutorAgent(
+            planner=LocalHFModel("deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"),
+            executor=LocalHFModel("Qwen/Qwen2.5-7B-Instruct"),
+            config=PlannerExecutorConfig(),
+        )
+
+        async with AsyncPredicateBrowser() as browser:
+            runtime = await AgentRuntime.from_browser(browser)
+            result = await agent.run(
+                runtime=runtime,
+                browser=browser,
+                task="Search for product and add to cart",
+            )
+    """
+
+    def __init__(
+        self,
+        planner: LocalHFModel | LocalMLXModel,
+        executor: LocalHFModel | LocalMLXModel,
+        config: PlannerExecutorConfig | None = None,
+        vision_llm: Any = None,
+        ctx_formatter: SentienceContext | None = None,
+        cursor_policy: CursorPolicy | None = None,
+    ):
+        self.planner = planner
+        self.executor = executor
+        self.config = config or PlannerExecutorConfig()
+        self.vision_llm = vision_llm
+        self.ctx_formatter = ctx_formatter or SentienceContext(max_elements=120)
+        self.cursor_policy = cursor_policy or CursorPolicy(
+            mode="human", duration_ms=550, pause_before_click_ms=120, jitter_px=1.5
+        )
+
+        # State tracking
+        self._current_plan: dict[str, Any] | None = None
+        self._step_index: int = 0
+        self._replans_used: int = 0
+        self._snapshot_context: SnapshotContext | None = None
+        self._vision_calls: int = 0
+
+    async def plan(self, task: str, max_attempts: int = 2) -> dict[str, Any]:
+        """
+        Generate execution plan from task description.
+
+        Returns:
+            JSON plan with steps, predicates, and metadata.
+        """
+        plan, raw_output = extract_plan_with_retry(
+            self.planner, task, max_attempts=max_attempts
+        )
+        errors = validate_plan(plan)
+        smoothness = validate_plan_smoothness(plan, task)
+        if errors or smoothness:
+            combined = errors + smoothness
+            raise RuntimeError(
+                "Planner output failed validation:\n- " + "\n- ".join(combined)
+            )
+        self._current_plan = plan
+        self._step_index = 0
+        return plan
+
+    async def replan(
+        self,
+        task: str,
+        failed_step_id: int | None,
+        failure_code: str,
+        short_note: str,
+        max_attempts: int = 2,
+    ) -> dict[str, Any]:
+        """
+        Generate patched plan after step failure.
+
+        Returns:
+            Updated plan with failed step modified.
+        """
+        if self._current_plan is None:
+            raise RuntimeError("Cannot replan without an existing plan")
+
+        new_plan, raw_output, mode = extract_replan_with_retry(
+            self.planner,
+            task,
+            current_plan=self._current_plan,
+            failed_step_id=failed_step_id,
+            failure_code=failure_code,
+            short_note=short_note,
+            max_attempts=max_attempts,
+        )
+        self._current_plan = new_plan
+        self._replans_used += 1
+        return new_plan
+
+    async def snapshot(
+        self,
+        runtime: AgentRuntime,
+        goal: str,
+        capture_screenshot: bool = False,
+    ) -> SnapshotContext:
+        """
+        Capture snapshot with limit escalation and vision detection.
+
+        Returns:
+            SnapshotContext with snapshot data and vision fallback flags.
+        """
+        ctx = await snapshot_with_escalation(
+            runtime=runtime,
+            ctx_formatter=self.ctx_formatter,
+            goal=goal,
+            config=self.config,
+            capture_screenshot=capture_screenshot,
+        )
+        self._snapshot_context = ctx
+        return ctx
+
+    async def execute_step(
+        self,
+        step: dict[str, Any],
+        runtime: AgentRuntime,
+        browser: AsyncPredicateBrowser,
+        feedback_path: Path,
+        run_id: str,
+    ) -> tuple[bool, str]:
+        """
+        Execute a single plan step with vision fallback.
+
+        Returns:
+            (success, note) tuple indicating step outcome.
+        """
+        # Check if we should use vision proactively based on last snapshot
+        if (
+            self._snapshot_context is not None
+            and self._snapshot_context.should_use_vision()
+            and self.vision_llm is not None
+            and self._vision_calls < self.config.max_vision_calls
+        ):
+            print(
+                f"  [agent] Using vision fallback (reason: {self._snapshot_context.requires_vision})",
+                flush=True,
+            )
+            self._vision_calls += 1
+
+        ok, note = await run_executor_step(
+            step=step,
+            runtime=runtime,
+            browser=browser,
+            executor=self.executor,
+            ctx_formatter=self.ctx_formatter,
+            cursor_policy=self.cursor_policy,
+            vision_llm=self.vision_llm,
+            feedback_path=feedback_path,
+            run_id=run_id,
+        )
+        return ok, note
+
+    async def verify_step(
+        self,
+        runtime: AgentRuntime,
+        verify: list[dict[str, Any]],
+        required: bool,
+    ) -> bool:
+        """
+        Verify step completion with predicate-based assertions.
+
+        Uses incremental limit escalation for required verifications.
+        """
+        return await apply_verifications(
+            runtime=runtime,
+            verify=verify,
+            required=required,
+            config=self.config,
+        )
+
+    async def run(
+        self,
+        runtime: AgentRuntime,
+        browser: AsyncPredicateBrowser,
+        task: str,
+        feedback_path: Path | None = None,
+        run_id: str | None = None,
+        max_replans: int = 1,
+    ) -> tuple[bool, dict[str, Any]]:
+        """
+        Execute full task with planning, execution, and optional replanning.
+
+        Returns:
+            (success, summary) tuple with execution results.
+        """
+        run_id = run_id or str(uuid.uuid4())
+        feedback_path = feedback_path or Path("planner_feedback") / f"{run_id}.jsonl"
+        feedback_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Generate initial plan
+        plan = await self.plan(task)
+        steps = plan.get("steps", [])
+        if not steps:
+            return False, {"error": "No steps in plan"}
+
+        print("\n=== PlannerExecutorAgent: Plan Generated ===", flush=True)
+        print(json.dumps(plan, indent=2), flush=True)
+        print("=== End Plan ===\n", flush=True)
+
+        all_passed = True
+        summary = {
+            "run_id": run_id,
+            "task": task,
+            "steps": [],
+            "replans_used": 0,
+            "success": None,
+        }
+
+        step_index = 0
+        while step_index < len(steps):
+            step = steps[step_index]
+            step_start = time.time()
+
+            print(
+                f"[Step {step.get('id')}] {step.get('goal')}",
+                flush=True,
+            )
+
+            ok, note = await self.execute_step(
+                step=step,
+                runtime=runtime,
+                browser=browser,
+                feedback_path=feedback_path,
+                run_id=run_id,
+            )
+
+            # Handle optional substeps
+            await maybe_run_optional_substeps(
+                step=step,
+                runtime=runtime,
+                browser=browser,
+                executor=self.executor,
+                ctx_formatter=self.ctx_formatter,
+                cursor_policy=self.cursor_policy,
+                vision_llm=self.vision_llm,
+                feedback_path=feedback_path,
+                run_id=run_id,
+                step_ok=ok,
+                step_note=note,
+            )
+
+            duration_s = round(time.time() - step_start, 3)
+            summary["steps"].append({
+                "id": step.get("id"),
+                "goal": step.get("goal"),
+                "success": ok,
+                "note": note,
+                "duration_s": duration_s,
+            })
+
+            print(f"  Result: {'PASS' if ok else 'FAIL'} | {note}", flush=True)
+
+            # Handle failure with replanning
+            if not ok and step.get("required", False):
+                if self._replans_used < max_replans:
+                    try:
+                        new_plan = await self.replan(
+                            task=task,
+                            failed_step_id=step.get("id"),
+                            failure_code=str(note),
+                            short_note=f"id={step.get('id')} goal={step.get('goal')}",
+                        )
+                        steps = new_plan.get("steps", [])
+                        summary["replans_used"] = self._replans_used
+                        continue
+                    except Exception as exc:
+                        print(f"  Replan failed: {exc}", flush=True)
+                        all_passed = False
+                        break
+                else:
+                    all_passed = False
+                    break
+
+            # Check stop condition
+            if step.get("stop_if_true") and ok:
+                break
+
+            step_index += 1
+
+        summary["success"] = all_passed
+        summary["replans_used"] = self._replans_used
+        return all_passed, summary
+
 
 '''
 PLANNER_PROVIDER=mlx \
