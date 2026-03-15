@@ -542,7 +542,7 @@ def find_checkout_button_id(snap) -> int | None:
     if not candidates:
         return None
     candidates.sort()
-    return candidates[0][3]
+    return candidates[0][4]  # el_id is at index 4
 
 
 def find_search_box_id(snap) -> int | None:
@@ -638,8 +638,13 @@ def is_valid_product_link(snap, element_id: int) -> bool:
     Check if the executor's click choice is a valid product link.
 
     Returns True if the element:
-    - Is a link with href containing /dp/ or /gp/product/
-    - Does NOT contain refinements= (filter links)
+    - Is a link with href containing /dp/ or /gp/product/, OR
+    - Is a link with product-like text (brand + product name) and NOT a filter/rating link
+
+    Returns False if the element:
+    - Contains refinements= or rh= (filter links)
+    - Is a star rating link
+    - Has text indicating a filter/sponsored item
 
     This is used to validate executor selections before clicking.
     """
@@ -653,12 +658,42 @@ def is_valid_product_link(snap, element_id: int) -> bool:
             if role != "link":
                 return False
             href = (getattr(el, "href", "") or "").lower()
-            # Filter links are invalid
+            text = (getattr(el, "text", "") or "").strip().lower()
+
+            # Explicit filter links are invalid
             if "refinements=" in href or "rh=" in href:
                 return False
-            # Must be a product page
+
+            # Rating/star links are invalid
+            if "out of 5 stars" in text or "rating" in text:
+                return False
+
+            # Filter-like text patterns are invalid
+            filter_patterns = [
+                "free shipping", "apply", "filter", "prime", "sponsored ad -",
+                "see more", "show more", "a icon", "checkbox",
+                "traditional laptops", "customer ratings", "credit card",
+                "no annual fee", "cash back", "reward points"
+            ]
+            if any(p in text for p in filter_patterns):
+                return False
+
+            # If href has product path, it's valid
             if "/dp/" in href or "/gp/product/" in href:
                 return True
+
+            # If text looks like a product title, accept it even without /dp/ in href
+            # Product titles typically have brand + specs (e.g., "Lenovo ThinkPad E16 Gen 2 Business...")
+            # This handles JavaScript-navigated links where href might not contain the full path
+            if len(text) > 10:
+                # Check for product-like patterns (brand names, model numbers, specs)
+                product_indicators = [
+                    "thinkpad", "lenovo", "laptop", "computer", "notebook",
+                    "gen ", "business", "16gb", "32gb", "ssd", "ram", "ddr"
+                ]
+                if any(ind in text for ind in product_indicators):
+                    return True
+
             return False
         except Exception:
             continue
@@ -1455,10 +1490,18 @@ async def apply_verifications(
                 if opts is not None:
                     opts.limit = current_limit
 
+                print(
+                    f"    [verify_debug] Calling runtime.check with required=True, label={label}",
+                    flush=True,
+                )
                 ok = await runtime.check(pred, label=label, required=True).eventually(
                     timeout_s=cfg.verify_timeout_s,
                     poll_s=cfg.verify_poll_s,
                     max_snapshot_attempts=cfg.verify_max_attempts
+                )
+                print(
+                    f"    [verify_debug] runtime.check.eventually() returned ok={ok}",
+                    flush=True,
                 )
 
                 if ok:
@@ -2196,7 +2239,7 @@ async def run_executor_step(
             else (
                 60
                 if intent_lower
-                in {"search_box", "first_product_link", "first_search_result"}
+                in {"search_box", "first_product_link", "first_search_result", "proceed_to_checkout", "checkout"}
                 else 60
             )
         )
@@ -2494,7 +2537,15 @@ async def run_executor_step(
                 run_id,
             )
             step["_drawer_handled"] = True
+        print(
+            f"  [debug] apply_verifications: verify={verify}, required={required}",
+            flush=True,
+        )
         ok = await apply_verifications(runtime, verify, required)
+        print(
+            f"  [debug] apply_verifications returned: ok={ok}",
+            flush=True,
+        )
         if not ok and required and (intent or "").lower() == "search_box":
             # Amazon sometimes reports the search input as searchbox/combobox, not textbox.
             alt_ok = await runtime.check(
@@ -3231,6 +3282,70 @@ async def main() -> None:
                 )
                 print("  Planner step decision:", flush=True)
                 print(json.dumps(step, indent=2), flush=True)
+
+                # Pre-check: If step verification predicates already pass, skip execution
+                # This catches cases where a previous step actually succeeded but was marked as failed
+                step_verify = step.get("verify", [])
+                if step_verify:
+                    pre_check_passed = True
+                    for v in step_verify:
+                        try:
+                            pred = build_predicate(v)
+                            pre_ok = runtime.assert_(
+                                pred, label="pre_step_check", required=False
+                            )
+                            if not pre_ok:
+                                pre_check_passed = False
+                                break
+                        except Exception:
+                            pre_check_passed = False
+                            break
+                    if pre_check_passed:
+                        print(
+                            f"  [skip] Step verification already passes, skipping execution",
+                            flush=True,
+                        )
+                        ok, note = True, "pre_check_passed"
+                        step_end_ts = time.time()
+                        step_end_iso = now_iso()
+                        duration_s = round(step_end_ts - step_start_ts, 3)
+                        print(f"  result: {'PASS' if ok else 'FAIL'} | {note}", flush=True)
+                        print(f"  step_duration_s: {duration_s}", flush=True)
+                        verify_payload = {"assertions": [{"label": "pre_step_check", "passed": True}]}
+                        append_jsonl(
+                            feedback_path,
+                            {
+                                "event": "step_result",
+                                "run_id": run_id,
+                                "step": step,
+                                "success": ok,
+                                "note": note,
+                                "url": browser.page.url if browser.page else "unknown",
+                                "assertions": verify_payload,
+                                "step_start_ts": step_start_iso,
+                                "step_end_ts": step_end_iso,
+                                "duration_s": duration_s,
+                            },
+                        )
+                        summary["steps"].append(
+                            {
+                                "id": step.get("id"),
+                                "goal": step.get("goal"),
+                                "success": ok,
+                                "note": note,
+                                "url": browser.page.url if browser.page else "unknown",
+                                "step_start_ts": step_start_iso,
+                                "step_end_ts": step_end_iso,
+                                "duration_s": duration_s,
+                            }
+                        )
+                        if ok:
+                            current_url = browser.page.url if browser.page else None
+                            if current_url:
+                                last_known_good_url = current_url
+                        step_index += 1
+                        continue
+
                 ok, note = await run_executor_step(
                     step,
                     runtime,
