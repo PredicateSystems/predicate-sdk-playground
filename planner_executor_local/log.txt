@@ -1,7 +1,11 @@
-/Users/guoliangwang/Code/Sentience/sentience-sdk-playground/.venv/lib/python3.11/site-packages/imageio_ffmpeg/_utils.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+/Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/.venv/lib/python3.11/site-packages/imageio_ffmpeg/_utils.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   from pkg_resources import resource_filename
-Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files: 100%|██████████| 11/11 [00:00<00:00, 64982.17it/s]
-Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 48099.82it/s]
+
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]
+Fetching 11 files: 100%|██████████| 11/11 [00:00<00:00, 64982.17it/s]
+
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]
+Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 48099.82it/s]
 ☁️  [Sentience] Cloud tracing enabled (Pro tier)
 
 === Executor Log Start: ba0091b3-3a61-4bbe-ae7a-f645e5b988a7 @ 2026-03-14 22:17:59 ===
@@ -324,7 +328,7 @@
     [verify_debug] runtime.check.eventually() returned ok=True
   result: PASS | navigated
   step_duration_s: 17.75
-  Screenshot saved: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene1_Navigate_to_Amazon_homepage.png
+  Screenshot saved: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene1_Navigate_to_Amazon_homepage.png
 [2026-03-14 22:18:43] Step 2: Focus the search box
   Planner step decision:
 {
@@ -497,7 +501,7 @@
     [verify_debug] runtime.check.eventually() returned ok=True
   result: PASS | typed_and_submitted
   step_duration_s: 56.301
-  Screenshot saved: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene3_Type_search_query_and_submit.png
+  Screenshot saved: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene3_Type_search_query_and_submit.png
 [2026-03-14 22:19:40] Step 4: Click the first product in search results, go to product details page
   Planner step decision:
 {
@@ -699,7 +703,7 @@ Failed to generate video clip
   [debug] apply_verifications returned: ok=False
   result: FAIL | clicked
   step_duration_s: 145.628
-  Screenshot saved: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene4_Click_the_first_product_in_sea.png
+  Screenshot saved: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene4_Click_the_first_product_in_sea.png
 
 --- Compact prompt (snapshot) ---
 6429|link|Free Shipping by Amazon Get...|10300|0|1|1|1|amazon
@@ -1105,7 +1109,7 @@ Failed to generate video clip
     [verify_debug] runtime.check.eventually() returned ok=True
   result: PASS | navigated
   step_duration_s: 14.875
-  Screenshot saved: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene6_Navigate_to_cart_page.png
+  Screenshot saved: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene6_Navigate_to_cart_page.png
 [2026-03-14 22:23:32] Step 7: Proceed to checkout
   Planner step decision:
 {
@@ -1228,7 +1232,7 @@ Failed to generate video clip
   [debug] apply_verifications returned: ok=True
   result: PASS | clicked
   step_duration_s: 38.207
-  Screenshot saved: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene7_Proceed_to_checkout.png
+  Screenshot saved: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/scene7_Proceed_to_checkout.png
 
 === Run Summary ===
 run_id: ba0091b3-3a61-4bbe-ae7a-f645e5b988a7
@@ -1237,7 +1241,7 @@ duration_ms: 372963
 tokens_total: 9103
 Steps passed: 4/5
 
-Creating video from screenshots in /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759...
+Creating video from screenshots in /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759...
 Found 5 screenshots
   Processing scene1_Navigate_to_Amazon_homepage.png...
   Processing scene3_Type_search_query_and_submit.png...
@@ -1248,10 +1252,10 @@ Found 5 screenshots
   Processing scene7_Proceed_to_checkout.png...
   Creating summary screen...
   Concatenating clips...
-  Writing video to /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/demo.mp4...
+  Writing video to /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/demo.mp4...
 
-✅ Video created: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/demo.mp4
+✅ Video created: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/demo.mp4
    Total duration: 22.0s
    Scenes: 6
-✅ Video saved: /Users/guoliangwang/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/demo.mp4
+✅ Video saved: /Users/PredicateDEV/Code/Sentience/sentience-sdk-playground/planner_executor_local/screenshots/20260314_221759/demo.mp4
 ✅ [Sentience] Trace uploaded successfully
