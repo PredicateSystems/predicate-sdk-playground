@@ -377,6 +377,18 @@ class LocalMLXModel:
 
 
 def extract_json(text: str) -> dict[str, Any]:
+    # Strip DeepSeek R1 thinking tokens (</think> marks end of reasoning)
+    if "</think>" in text:
+        text = text.split("</think>", 1)[-1].strip()
+    # Also handle plain "think" without XML tags (some models output this way)
+    # Look for common patterns that indicate end of reasoning
+    for marker in ["</think>", "\n\n```json", "\n```json", "\n\n{"]:
+        if marker in text:
+            idx = text.find(marker)
+            if marker.startswith("\n"):
+                text = text[idx:].strip()
+            break
+
     # Prefer fenced JSON blocks if present.
     fence_match = re.search(r"```json\s*([\s\S]+?)\s*```", text, flags=re.IGNORECASE)
     if fence_match:
@@ -739,7 +751,11 @@ Format example (match keys exactly):
       "goal": "Focus the search box",
       "action": "CLICK",
       "intent": "search_box",
-      "verify": [{{ "predicate": "exists", "args": ["role=textbox"] }}],
+      "verify": [{{ "predicate": "any_of", "args": [
+        {{ "predicate": "exists", "args": ["role=searchbox"] }},
+        {{ "predicate": "exists", "args": ["role=textbox"] }},
+        {{ "predicate": "exists", "args": ["role=combobox"] }}
+      ]}}],
       "required": true
     }},
     {{
@@ -827,14 +843,14 @@ Format example (match keys exactly):
 
 Unsmooth example (INVALID):
 {{"steps":[
-  {{"id":1,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"exists","args":["role=textbox"]}}],"required":true}},
-  {{"id":2,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"exists","args":["role=textbox"]}}],"required":true}}
+  {{"id":1,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"any_of","args":[{{"predicate":"exists","args":["role=searchbox"]}},{{"predicate":"exists","args":["role=textbox"]}}]}}],"required":true}},
+  {{"id":2,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"any_of","args":[{{"predicate":"exists","args":["role=searchbox"]}},{{"predicate":"exists","args":["role=textbox"]}}]}}],"required":true}}
 ]}}
 Reason: redundant CLICK intents back-to-back.
 
 Smooth example (VALID):
 {{"steps":[
-  {{"id":1,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"exists","args":["role=textbox"]}}],"required":true}},
+  {{"id":1,"action":"CLICK","intent":"search_box","verify":[{{"predicate":"any_of","args":[{{"predicate":"exists","args":["role=searchbox"]}},{{"predicate":"exists","args":["role=textbox"]}}]}}],"required":true}},
   {{"id":2,"action":"TYPE_AND_SUBMIT","input":"thinkpad","verify":[{{"predicate":"url_contains","args":["k=thinkpad"]}}],"required":true}}
 ]}}
 
@@ -936,7 +952,10 @@ Return JSON in PATCH mode:
         "goal": "Rewrite the failed step",
         "action": "CLICK",
         "intent": "search_box",
-        "verify": [{{ "predicate": "exists", "args": ["role=textbox"] }}],
+        "verify": [{{ "predicate": "any_of", "args": [
+          {{ "predicate": "exists", "args": ["role=searchbox"] }},
+          {{ "predicate": "exists", "args": ["role=textbox"] }}
+        ]}}],
         "required": true
       }}
     }}
@@ -2874,15 +2893,18 @@ python main.py
 async def main() -> None:
     load_dotenv()
 
+    # Default to MLX with 4-bit quantized models for Apple Silicon
+    # Qwen 2.5 7B is better at structured JSON output than DeepSeek R1 distilled models
     planner_model = os.getenv(
-        "PLANNER_MODEL", "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+        "PLANNER_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit"
     )
-    executor_model = os.getenv("EXECUTOR_MODEL", "Qwen/Qwen2.5-7B-Instruct")# "Qwen/Qwen2.5-3B-Instruct")
+    executor_model = os.getenv("EXECUTOR_MODEL", "mlx-community/Qwen2.5-3B-Instruct-4bit")
     device_map = get_device_map()
     torch_dtype = get_torch_dtype()
 
-    planner_provider = (os.getenv("PLANNER_PROVIDER") or "hf").lower()
-    executor_provider = (os.getenv("EXECUTOR_PROVIDER") or "hf").lower()
+    # Default to MLX provider for 4-bit models
+    planner_provider = (os.getenv("PLANNER_PROVIDER") or "mlx").lower()
+    executor_provider = (os.getenv("EXECUTOR_PROVIDER") or "mlx").lower()
     if planner_provider == "mlx":
         planner = LocalMLXModel(planner_model)
     else:
