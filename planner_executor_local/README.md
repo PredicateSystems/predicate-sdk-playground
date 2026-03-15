@@ -3,31 +3,28 @@
 This folder is a starter for a **planner + executor** Amazon flow, modeled after
 `amazon_shopping_with_assertions` (snapshots + `AgentRuntime` assertions per step).
 
-- **Planner**: Qwen 2.5 7B (produces a step plan)
-- **Executor**: Qwen 2.5 3B (executes each step deterministically)
+- **Planner**: Qwen 3.5 9B (MLX 4-bit quantized) — produces a step plan
+- **Executor**: Qwen 3.5 4B (MLX 4-bit quantized) — executes each step deterministically
 
-### Model Recommendation (7B)
+> **Upgrade note**: We now use Qwen 3.5 models (9B planner, 4B executor) which provide better JSON output and reasoning compared to the older Qwen 2.5 models (7B/3B). The MLX 4-bit quantization runs efficiently on Apple Silicon.
 
-**Short answer (public repo default):** use **MPS** (or `auto`) with **fp16/bf16**.
+### Model Recommendation (Apple Silicon)
 
-- **Apple Silicon / MPS**: Bitsandbytes 4-bit is not supported. Use `torch_dtype=torch.float16` and `device_map="mps"` (or `auto`). This is the recommended public default.
-- **CUDA GPU available**: You can use 4-bit (`load_in_4bit=True`) for memory headroom.
-- **CPU-only**: The 7B model will be slow; expect long runtimes.
+**Default:** MLX with 4-bit quantized Qwen 3.5 models.
 
-This keeps the code consistent with the 3B HF transformer path while adapting to hardware constraints.
+- **Apple Silicon (recommended)**: Uses MLX backend with `mlx-community/Qwen3.5-9B-MLX-4bit` (planner) and `mlx-community/Qwen3.5-4B-MLX-4bit` (executor). Fast and memory-efficient.
+- **CUDA GPU available**: You can use HuggingFace Transformers with 4-bit quantization (`load_in_4bit=True`).
+- **CPU-only**: Not recommended for 9B models; expect very slow runtimes.
 
-### Warm-up Download (7B)
+### Prerequisites (MLX)
 
-This script downloads the 7B model weights into the HF cache without loading the model:
+Install the MLX language model library:
 
 ```bash
-python download_qwen25_7b.py
+pip install mlx-lm>=0.31.1
 ```
 
-Optional environment variables:
-
-- `HF_HOME` or `TRANSFORMERS_CACHE` to control cache location
-- `HF_TOKEN` if your environment requires authentication
+> **Important**: Version 0.31.1+ is required for Qwen 3.5 model support.
 
 ### Next Step
 
@@ -45,18 +42,39 @@ This scaffold includes:
 - **Summary JSON**: compact summary at `planner_feedback/<run_id>.summary.json`.
 - **Vision fallback (optional)**: set `ENABLE_VISION_FALLBACK=1`.
 
-On Apple Silicon, do following export to use MLX:
+### Default Models (Qwen 3.5)
+
+The script defaults to Qwen 3.5 MLX models on Apple Silicon:
 
 ```bash
-pip install mlx-vlm
+# Default (no env vars needed on Apple Silicon)
+python main.py
 ```
 
-then export:
+This uses:
+- **Planner**: `mlx-community/Qwen3.5-9B-MLX-4bit`
+- **Executor**: `mlx-community/Qwen3.5-4B-MLX-4bit`
+
+### Custom Model Configuration
+
+To override models or use different providers:
+
 ```bash
 export PLANNER_PROVIDER=mlx \
-PLANNER_MODEL=mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit \
+PLANNER_MODEL=mlx-community/Qwen3.5-9B-MLX-4bit \
+EXECUTOR_PROVIDER=mlx \
+EXECUTOR_MODEL=mlx-community/Qwen3.5-4B-MLX-4bit
+python main.py
+```
+
+For HuggingFace Transformers (CUDA):
+
+```bash
+export PLANNER_PROVIDER=hf \
+PLANNER_MODEL=Qwen/Qwen2.5-7B-Instruct \
 EXECUTOR_PROVIDER=hf \
-EXECUTOR_MODEL=Qwen/Qwen2.5-7B-Instruct
+EXECUTOR_MODEL=Qwen/Qwen2.5-3B-Instruct
+python main.py
 ```
 
 ### Vision Fallback (optional)

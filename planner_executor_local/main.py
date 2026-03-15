@@ -338,7 +338,11 @@ class LocalMLXModel:
         ]
         apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
         if callable(apply_chat_template):
-            return apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            # Disable thinking mode for Qwen 3.5 models to get direct JSON output
+            kwargs: dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
+            if "qwen3" in self.model_name.lower():
+                kwargs["enable_thinking"] = False
+            return apply_chat_template(messages, **kwargs)
         return f"{system}\n\n{user}"
 
     def generate(
@@ -367,12 +371,19 @@ class LocalMLXModel:
             prompt,
             **kwargs,
         )
-        # mlx-lm doesn't expose token usage; keep zeros for now.
+        # mlx-lm doesn't expose token usage directly, so we calculate it
+        # using the tokenizer
+        try:
+            prompt_tokens = len(self.tokenizer.encode(prompt))
+            completion_tokens = len(self.tokenizer.encode(text.strip()))
+        except Exception:
+            prompt_tokens = 0
+            completion_tokens = 0
         return LlmResult(
             content=text.strip(),
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
         )
 
 
@@ -566,6 +577,19 @@ def find_search_box_id(snap) -> int | None:
 
 
 def find_first_product_link_id(snap, keyword: str) -> int | None:
+    """
+    Find the first valid product link in search results.
+
+    Prioritization:
+    1. Links with /dp/ or /gp/product/ in href (REQUIRED - these are product pages)
+    2. Links containing the search keyword in text (preferred but not required)
+    3. Links with lower doc_y (higher on page)
+    4. Links with higher importance
+
+    Explicitly excludes:
+    - Filter/refinement links (refinements= in href)
+    - Sponsored labels and menu items
+    """
     if not snap or not getattr(snap, "elements", None):
         return None
     key = (keyword or "").strip().lower()
@@ -575,24 +599,70 @@ def find_first_product_link_id(snap, keyword: str) -> int | None:
             role = (getattr(el, "role", "") or "").lower()
             if role != "link":
                 continue
-            text = (getattr(el, "text", "") or "").strip()
-            if not text or key not in text.lower():
-                continue
             href = (getattr(el, "href", "") or "").lower()
+            # REQUIRED: Must be a product page link
             if "/dp/" not in href and "/gp/product/" not in href:
+                continue
+            # EXCLUDE: Filter/refinement links
+            if "refinements=" in href or "rh=" in href:
+                continue
+            text = (getattr(el, "text", "") or "").strip()
+            # Skip empty text or very short text (likely icons)
+            if not text or len(text) < 3:
+                continue
+            # Skip obvious non-product items
+            text_lower = text.lower()
+            if any(skip in text_lower for skip in [
+                "sponsored", "free shipping", "prime", "filter", "sort by",
+                "amazon haul", "see all", "show more"
+            ]):
                 continue
             in_viewport = bool(getattr(el, "in_viewport", True))
             doc_y = getattr(el, "doc_y", None)
             importance = getattr(el, "importance", 0) or 0
+            # Prioritize: keyword match (0=has keyword, 1=no keyword), viewport, doc_y, importance
+            has_keyword = 0 if key and key in text_lower else 1
             candidates.append(
-                (not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
+                (has_keyword, not in_viewport, doc_y if doc_y is not None else 1e9, -importance, el.id)
             )
         except Exception:
             continue
     if not candidates:
         return None
     candidates.sort()
-    return candidates[0][3]
+    return candidates[0][4]
+
+
+def is_valid_product_link(snap, element_id: int) -> bool:
+    """
+    Check if the executor's click choice is a valid product link.
+
+    Returns True if the element:
+    - Is a link with href containing /dp/ or /gp/product/
+    - Does NOT contain refinements= (filter links)
+
+    This is used to validate executor selections before clicking.
+    """
+    if not snap or not getattr(snap, "elements", None) or element_id is None:
+        return False
+    for el in snap.elements:
+        try:
+            if getattr(el, "id", None) != element_id:
+                continue
+            role = (getattr(el, "role", "") or "").lower()
+            if role != "link":
+                return False
+            href = (getattr(el, "href", "") or "").lower()
+            # Filter links are invalid
+            if "refinements=" in href or "rh=" in href:
+                return False
+            # Must be a product page
+            if "/dp/" in href or "/gp/product/" in href:
+                return True
+            return False
+        except Exception:
+            continue
+    return False
 
 
 def find_add_to_cart_button_id(snap) -> int | None:
@@ -910,6 +980,7 @@ def build_replan_prompt(
     failed_step_id: int | None,
     failure_code: str,
     short_note: str,
+    failed_step: dict[str, Any] | None = None,
     strict: bool = False,
     schema_errors: str | None = None,
 ) -> tuple[str, str]:
@@ -919,6 +990,8 @@ def build_replan_prompt(
         "Do not change earlier successful steps.\n"
         "Actions must be one of: NAVIGATE, CLICK, TYPE_AND_SUBMIT.\n"
         "Do NOT hardcode product URLs like /dp/product-url; use CLICK on a product link.\n"
+        "IMPORTANT: Preserve working verify predicates. If url_contains('/dp/') was correct, keep it.\n"
+        "Only change the action or intent, not the verify predicates, unless the predicate itself was wrong.\n"
         "Return ONLY a JSON object. No explanations, no <think> tags, no code fences."
     )
     strict_note = (
@@ -931,6 +1004,18 @@ def build_replan_prompt(
         if schema_errors
         else ""
     )
+    # Include the original failed step so the planner can see the original verify predicates
+    original_step_json = ""
+    if failed_step:
+        import json
+        original_step_json = f"\nOriginal failed step:\n{json.dumps(failed_step, indent=2)}\n"
+
+    # Build example that preserves original verify if available
+    example_verify = '[{ "predicate": "url_contains", "args": ["/dp/"] }]'
+    if failed_step and "verify" in failed_step:
+        import json
+        example_verify = json.dumps(failed_step["verify"])
+
     user = f"""
 Task: {task}
 {strict_note}
@@ -939,7 +1024,11 @@ Failure summary:
 - failed_step_id: {failed_step_id}
 - failure_code: {failure_code}
 - note: {short_note}
-{schema_note}
+{original_step_json}{schema_note}
+
+IMPORTANT: The verify predicates in the original step were likely CORRECT.
+The failure was probably in the action/intent selection, NOT the verification.
+PRESERVE the original verify predicates unless you are certain they were wrong.
 
 Return JSON in PATCH mode:
 {{
@@ -949,13 +1038,10 @@ Return JSON in PATCH mode:
       "id": {failed_step_id or 1},
       "step": {{
         "id": {failed_step_id or 1},
-        "goal": "Rewrite the failed step",
+        "goal": "Rewrite the failed step with same verify predicates",
         "action": "CLICK",
-        "intent": "search_box",
-        "verify": [{{ "predicate": "any_of", "args": [
-          {{ "predicate": "exists", "args": ["role=searchbox"] }},
-          {{ "predicate": "exists", "args": ["role=textbox"] }}
-        ]}}],
+        "intent": "first_product_link",
+        "verify": {example_verify},
         "required": true
       }}
     }}
@@ -974,6 +1060,7 @@ def extract_replan_with_retry(
     failed_step_id: int | None,
     failure_code: str,
     short_note: str,
+    failed_step: dict[str, Any] | None = None,
     max_attempts: int = 2,
 ) -> tuple[dict[str, Any], str, str]:
     last_output = ""
@@ -990,6 +1077,7 @@ def extract_replan_with_retry(
             failed_step_id=failed_step_id,
             failure_code=failure_code,
             short_note=short_note,
+            failed_step=failed_step,
             strict=(planner_requires_strict or attempt > 1),
             schema_errors=last_errors or None,
         )
@@ -1048,9 +1136,12 @@ def build_executor_prompt(
     if intent_lower in {"first_product_link", "first_search_result"}:
         extra_rules = (
             "CRITICAL RULES FOR SEARCH RESULTS:\n"
-            "1) ONLY click product whose href contains '/dp/' or '/gp/product/'.\n"
-            "2) Ignore menu items, start rating links, or top nav links (e.g., 'Amazon Haul').\n"
-            "3) Do NOT follow high importance alone; prioritize ordinality (ord=0) in the dominant group (DG=1).\n\n"
+            "1) ONLY click product links whose href contains '/dp/' or '/gp/product/'.\n"
+            "2) IGNORE all filter/refinement links with 'refinements=' in href (e.g., 'Free Shipping', 'Prime').\n"
+            "3) IGNORE menu items, rating links, top nav links, and sponsored labels.\n"
+            "4) Prefer links with ord=0 (first product) in the dominant group (DG=1).\n"
+            "5) High importance score does NOT mean it's a product - filter links often have high scores.\n"
+            "6) Product links typically show product names/titles, not filter options.\n\n"
         )
     elif intent_lower in {"search_box", "search_input"}:
         extra_rules = (
@@ -2284,12 +2375,31 @@ async def run_executor_step(
                 )
         elif intent_lower in {"first_product_link", "first_search_result"}:
             try:
-                if preferred_id is not None and preferred_id != click_id:
+                # Validate executor's choice: must be a valid product link (not a filter)
+                executor_choice_valid = is_valid_product_link(snap, click_id)
+                if not executor_choice_valid and click_id is not None:
                     print(
-                        f"  [override] first_product_link -> CLICK({preferred_id})",
+                        f"  [validate] executor picked invalid element {click_id} (not a product link)",
+                        flush=True,
+                    )
+                if preferred_id is not None and (
+                    preferred_id != click_id or not executor_choice_valid
+                ):
+                    print(
+                        f"  [override] first_product_link -> CLICK({preferred_id}) "
+                        f"(executor_valid={executor_choice_valid})",
                         flush=True,
                     )
                     click_id = preferred_id
+                elif not executor_choice_valid and preferred_id is None:
+                    # Executor choice invalid and no fallback - try to find any valid product link
+                    fallback_id = find_first_product_link_id(snap, "")
+                    if fallback_id is not None:
+                        print(
+                            f"  [override] no preferred_id, using fallback -> CLICK({fallback_id})",
+                            flush=True,
+                        )
+                        click_id = fallback_id
             except Exception as exc:
                 print(
                     f"  [warn] first_product_link override failed: {exc}",
@@ -2447,6 +2557,35 @@ async def maybe_run_optional_substeps(
     step_ok: bool,
     step_note: str | None = None,
 ) -> None:
+    """
+    Run optional substeps for a step. Errors are caught and logged but not
+    re-raised since these are optional operations.
+    """
+    try:
+        await _run_optional_substeps_impl(
+            step, runtime, browser, executor, ctx_formatter, cursor_policy,
+            vision_llm, feedback_path, run_id, step_ok, step_note
+        )
+    except Exception as exc:
+        # Log but don't fail - optional substeps should not break the main flow
+        exc_type = type(exc).__name__
+        print(f"  [optional_substeps] Warning: {exc_type}: {exc}", flush=True)
+
+
+async def _run_optional_substeps_impl(
+    step: dict[str, Any],
+    runtime: AgentRuntime,
+    browser: AsyncPredicateBrowser,
+    executor: LocalHFModel,
+    ctx_formatter: SentienceContext,
+    cursor_policy: CursorPolicy,
+    vision_llm: Any,
+    feedback_path: Path,
+    run_id: str,
+    step_ok: bool,
+    step_note: str | None = None,
+) -> None:
+    """Internal implementation of optional substeps."""
     intent_lower = (step.get("intent") or "").lower()
     optional = step.get("optional_substeps") or []
     if not optional:
@@ -2665,6 +2804,7 @@ class PlannerExecutorAgent:
         failed_step_id: int | None,
         failure_code: str,
         short_note: str,
+        failed_step: dict[str, Any] | None = None,
         max_attempts: int = 2,
     ) -> dict[str, Any]:
         """
@@ -2683,6 +2823,7 @@ class PlannerExecutorAgent:
             failed_step_id=failed_step_id,
             failure_code=failure_code,
             short_note=short_note,
+            failed_step=failed_step,
             max_attempts=max_attempts,
         )
         self._current_plan = new_plan
@@ -2860,6 +3001,7 @@ class PlannerExecutorAgent:
                             failed_step_id=step.get("id"),
                             failure_code=str(note),
                             short_note=f"id={step.get('id')} goal={step.get('goal')}",
+                            failed_step=step,  # Pass original step to preserve verify predicates
                         )
                         steps = new_plan.get("steps", [])
                         summary["replans_used"] = self._replans_used
@@ -2894,11 +3036,11 @@ async def main() -> None:
     load_dotenv()
 
     # Default to MLX with 4-bit quantized models for Apple Silicon
-    # Qwen 2.5 7B is better at structured JSON output than DeepSeek R1 distilled models
+    # Qwen 3.5 models (released 2025) - 9B for planner, 4B for executor
     planner_model = os.getenv(
-        "PLANNER_MODEL", "mlx-community/Qwen2.5-7B-Instruct-4bit"
+        "PLANNER_MODEL", "mlx-community/Qwen3.5-9B-MLX-4bit"
     )
-    executor_model = os.getenv("EXECUTOR_MODEL", "mlx-community/Qwen2.5-3B-Instruct-4bit")
+    executor_model = os.getenv("EXECUTOR_MODEL", "mlx-community/Qwen3.5-4B-MLX-4bit")
     device_map = get_device_map()
     torch_dtype = get_torch_dtype()
 
@@ -3067,6 +3209,8 @@ async def main() -> None:
             max_replans = int(os.getenv("MAX_REPLANS", "1"))
             replans_used = 0
             step_index = 0
+            # Track the last known good URL for recovery after wrong navigation
+            last_known_good_url: str | None = None
             summary = {
                 "run_id": run_id,
                 "task": task,
@@ -3208,12 +3352,93 @@ async def main() -> None:
                         "token_usage": usage,
                     }
                 )
+                # Track URL after successful steps for recovery
+                if ok:
+                    current_url = browser.page.url if browser.page else None
+                    if current_url:
+                        last_known_good_url = current_url
+
                 if not ok and step.get("required", False):
                     if replans_used < max_replans:
                         replans_used += 1
                         summary["replans_used"] = replans_used
                         failure_code = str(note or "unknown_failure")
                         short_note = f"id={step.get('id')} goal={step.get('goal')}"
+
+                        # Recovery: Navigate back to last known good URL if we're on a wrong page
+                        # Use the step's verify predicates to detect off-track navigation
+                        current_url = browser.page.url if browser.page else ""
+                        if last_known_good_url and current_url and current_url != last_known_good_url:
+                            # Check if we should recover by verifying we can't satisfy
+                            # the step's expected predicates from our current location
+                            is_off_track = False
+                            off_track_reason = ""
+                            failed_predicates: list[str] = []
+
+                            # Get the step's verify predicates and check each one
+                            step_verify = step.get("verify", [])
+                            for v in step_verify:
+                                pred_name = v.get("predicate", "")
+                                pred_args = v.get("args", [])
+
+                                # Build predicate and check if it fails
+                                if pred_name == "url_contains" and pred_args:
+                                    expected_pattern = str(pred_args[0])
+                                    pred_ok = runtime.assert_(
+                                        url_contains(expected_pattern),
+                                        label=f"recovery_check_{pred_name}",
+                                        required=False,
+                                    )
+                                    if not pred_ok:
+                                        failed_predicates.append(f"url_contains({expected_pattern})")
+                                elif pred_name == "exists" and pred_args:
+                                    # Element existence check - if element doesn't exist on wrong page
+                                    pred_ok = runtime.assert_(
+                                        exists(str(pred_args[0])),
+                                        label=f"recovery_check_{pred_name}",
+                                        required=False,
+                                    )
+                                    if not pred_ok:
+                                        failed_predicates.append(f"exists({pred_args[0]})")
+
+                            # If any predicate failed and we're on a different URL, we're off-track
+                            if failed_predicates:
+                                is_off_track = True
+                                off_track_reason = f"predicates failed: {', '.join(failed_predicates)}"
+
+                            if is_off_track:
+                                print(f"  [recovery] Detected off-track navigation", flush=True)
+                                print(f"  [recovery] Reason: {off_track_reason}", flush=True)
+                                print(f"  [recovery] Current URL: {current_url[:80]}...", flush=True)
+                                print(f"  [recovery] Navigating back to: {last_known_good_url[:80]}...", flush=True)
+                                try:
+                                    await browser.page.goto(last_known_good_url, timeout=30_000)
+                                    await browser.page.wait_for_load_state("domcontentloaded", timeout=15_000)
+                                    # Verify we're back by checking the URL changed back
+                                    recovered_url = browser.page.url if browser.page else ""
+                                    recovery_ok = recovered_url == last_known_good_url or (
+                                        last_known_good_url in recovered_url
+                                    )
+                                    if recovery_ok:
+                                        print(f"  [recovery] Successfully navigated back", flush=True)
+                                    else:
+                                        print(f"  [recovery] Navigation completed but URL differs", flush=True)
+                                    append_jsonl(
+                                        feedback_path,
+                                        {
+                                            "event": "recovery_navigation",
+                                            "run_id": run_id,
+                                            "from_url": current_url,
+                                            "to_url": last_known_good_url,
+                                            "recovered_url": recovered_url,
+                                            "reason": off_track_reason,
+                                            "failed_predicates": failed_predicates,
+                                            "recovery_verified": bool(recovery_ok),
+                                        },
+                                    )
+                                except Exception as nav_exc:
+                                    print(f"  [recovery] Failed to navigate back: {nav_exc}", flush=True)
+
                         try:
                             new_plan, raw_replan_output, replan_mode = extract_replan_with_retry(
                                 planner,
@@ -3222,6 +3447,7 @@ async def main() -> None:
                                 failed_step_id=step.get("id"),
                                 failure_code=failure_code,
                                 short_note=short_note,
+                                failed_step=step,  # Pass the original step to preserve verify predicates
                                 max_attempts=2,
                             )
                             if (

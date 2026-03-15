@@ -6,7 +6,7 @@ This repository contains **8 real-world browser agent demos** that run using:
 
 * **Semantic geometry snapshots (DOM-based, not vision)**
 * **Jest-style AgentRuntime assertions**
-* **6 of these 8 demos use local-first inference (Qwen 2.5 3B)**
+* **6 of these 8 demos use local-first inference (Qwen 2.5 3B or Qwen 3.5 4B/9B)**
 * **`amazon_shopping` and `google_search` use cloud LLM models for comparison**
 * **Optional vision fallback only after exhaustion**
 
@@ -199,9 +199,21 @@ amazon_shopping_with_assertions/ # Real-world stress test
 login_profile_check/             # SPA + form + login flows
 dashboard_kpi_extraction/        # KPI extraction + DOM churn
 form_validation_submission/      # Multi-step form validation
+planner_executor_local/          # Planner+Executor with Qwen 3.5 (9B/4B)
 local-llama-land/               # Demo Next.js site (SPA)
 docs/                           # Reports, plans, comparisons
 ```
+
+### Planner + Executor (Local)
+
+The `planner_executor_local/` demo showcases a **planner + executor** architecture using the latest **Qwen 3.5** models:
+
+- **Planner**: Qwen 3.5 9B (MLX 4-bit) — generates step-by-step plans
+- **Executor**: Qwen 3.5 4B (MLX 4-bit) — executes each step deterministically
+
+These Qwen 3.5 models provide better JSON output and reasoning compared to the older Qwen 2.5 7B/3B models, with efficient MLX 4-bit quantization for Apple Silicon.
+
+📂 [`planner_executor_local/`](planner_executor_local/)
 
 ---
 
