@@ -728,6 +728,7 @@ def create_automation_task(
 async def run_demo(
     goal: str | None = None,
     query: str | None = None,
+    starting_url: str = "https://www.amazon.com",
     headless: bool = False,
     use_local: bool = False,
     planner_model: str | None = None,
@@ -740,6 +741,7 @@ async def run_demo(
     Args:
         goal: High-level goal for less-defined task
         query: Search query for specific task
+        starting_url: Starting URL for the automation
         headless: Run browser in headless mode
         use_local: Use local LLM models instead of OpenAI
         planner_model: Override planner model name
@@ -844,7 +846,7 @@ async def run_demo(
     )
 
     # Create automation task
-    task = create_automation_task(goal=goal, query=query)
+    task = create_automation_task(goal=goal, query=query, starting_url=starting_url)
 
     logger.info("=" * 60)
     logger.info("Starting PlannerExecutorAgent Demo")
@@ -947,6 +949,12 @@ def main():
         help="Search query for Amazon (e.g., 'wireless mouse')",
     )
     parser.add_argument(
+        "--url",
+        type=str,
+        default="https://www.amazon.com",
+        help="Starting URL (default: https://www.amazon.com)",
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         default=os.getenv("HEADLESS", "").lower() in {"1", "true", "yes"},
@@ -991,6 +999,7 @@ def main():
     result = asyncio.run(run_demo(
         goal=args.goal,
         query=args.query,
+        starting_url=args.url,
         headless=args.headless,
         use_local=args.local,
         planner_model=args.planner_model,
