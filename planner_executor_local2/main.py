@@ -69,6 +69,7 @@ from predicate.agents import (
     PlannerExecutorConfig,
     RecoveryState,
     SnapshotEscalationConfig,
+    StepwisePlanningConfig,
     SuccessCriteria,
     TaskCategory,
     COMMON_HINTS,
@@ -734,6 +735,7 @@ async def run_demo(
     planner_model: str | None = None,
     executor_model: str | None = None,
     provider_type: str = "mlx",
+    stepwise: bool = False,
 ) -> dict[str, Any]:
     """
     Run the PlannerExecutorAgent demo.
@@ -747,6 +749,7 @@ async def run_demo(
         planner_model: Override planner model name
         executor_model: Override executor model name
         provider_type: "mlx" or "hf" for local models
+        stepwise: Use stepwise (ReAct-style) planning instead of upfront planning
 
     Returns:
         Result dictionary with run outcome
@@ -767,6 +770,7 @@ async def run_demo(
     use_api = bool((predicate_api_key or "").strip())
 
     logger.info(f"Mode: {'local' if use_local else 'openai'}")
+    logger.info(f"Planning: {'stepwise (ReAct)' if stepwise else 'upfront'}")
     logger.info(f"Planner model: {planner_model}")
     logger.info(f"Executor model: {executor_model}")
     logger.info(f"Predicate API: {'enabled' if use_api else 'disabled (no PREDICATE_API_KEY)'}")
@@ -820,6 +824,12 @@ async def run_demo(
         trace_screenshots=True,
         # Verbose mode - print plan and executor prompts to stdout
         verbose=True,
+        # Stepwise planning config
+        stepwise=StepwisePlanningConfig(
+            max_steps=30,
+            action_history_limit=5,
+            include_page_context=True,
+        ),
     )
 
     # Create tracer
@@ -859,9 +869,25 @@ async def run_demo(
     logger.info("=" * 60)
 
     # Run automation
+    # Grant common permissions to avoid browser permission prompts during automation.
+    # Supported permissions (may vary by browser version):
+    # - geolocation: store locators, local inventory
+    # - notifications: push notification prompts
+    # - clipboard-read/write: copy/paste functionality
+    # See: https://playwright.dev/python/docs/api/class-browsercontext#browser-context-grant-permissions
+    permission_policy = {
+        "auto_grant": [
+            "geolocation",
+            "notifications",
+            "clipboard-read",
+            "clipboard-write",
+        ],
+        "geolocation": {"latitude": 47.6762, "longitude": -122.2057},  # Kirkland, WA
+    }
     async with AsyncPredicateBrowser(
         api_key=predicate_api_key,
         headless=headless,
+        permission_policy=permission_policy,
     ) as browser:
         # AsyncSentienceBrowser creates a page in start() and stores it in browser.page
         page = browser.page
@@ -892,7 +918,11 @@ async def run_demo(
         )
 
         try:
-            result = await agent.run(runtime, task)
+            # Use stepwise or upfront planning based on flag
+            if stepwise:
+                result = await agent.run_stepwise(runtime, task)
+            else:
+                result = await agent.run(runtime, task)
 
             logger.info("=" * 60)
             logger.info("Run Complete")
@@ -984,6 +1014,11 @@ def main():
         type=str,
         help=f"Executor model name (default: gpt-4o-mini or {DEFAULT_LOCAL_EXECUTOR_MODEL} for local)",
     )
+    parser.add_argument(
+        "--stepwise",
+        action="store_true",
+        help="Use stepwise (ReAct-style) planning instead of upfront planning",
+    )
 
     args = parser.parse_args()
 
@@ -1005,6 +1040,7 @@ def main():
         planner_model=args.planner_model,
         executor_model=args.executor_model,
         provider_type=args.provider,
+        stepwise=args.stepwise,
     ))
 
     # Exit with appropriate code
