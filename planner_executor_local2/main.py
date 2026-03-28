@@ -69,6 +69,7 @@ from predicate.agents import (
     PlannerExecutorConfig,
     RecoveryState,
     SnapshotEscalationConfig,
+    StepwisePlanningConfig,
     SuccessCriteria,
     TaskCategory,
     COMMON_HINTS,
@@ -728,11 +729,13 @@ def create_automation_task(
 async def run_demo(
     goal: str | None = None,
     query: str | None = None,
+    starting_url: str = "https://www.amazon.com",
     headless: bool = False,
     use_local: bool = False,
     planner_model: str | None = None,
     executor_model: str | None = None,
     provider_type: str = "mlx",
+    stepwise: bool = False,
 ) -> dict[str, Any]:
     """
     Run the PlannerExecutorAgent demo.
@@ -740,11 +743,13 @@ async def run_demo(
     Args:
         goal: High-level goal for less-defined task
         query: Search query for specific task
+        starting_url: Starting URL for the automation
         headless: Run browser in headless mode
         use_local: Use local LLM models instead of OpenAI
         planner_model: Override planner model name
         executor_model: Override executor model name
         provider_type: "mlx" or "hf" for local models
+        stepwise: Use stepwise (ReAct-style) planning instead of upfront planning
 
     Returns:
         Result dictionary with run outcome
@@ -765,6 +770,7 @@ async def run_demo(
     use_api = bool((predicate_api_key or "").strip())
 
     logger.info(f"Mode: {'local' if use_local else 'openai'}")
+    logger.info(f"Planning: {'stepwise (ReAct)' if stepwise else 'upfront'}")
     logger.info(f"Planner model: {planner_model}")
     logger.info(f"Executor model: {executor_model}")
     logger.info(f"Predicate API: {'enabled' if use_api else 'disabled (no PREDICATE_API_KEY)'}")
@@ -818,6 +824,12 @@ async def run_demo(
         trace_screenshots=True,
         # Verbose mode - print plan and executor prompts to stdout
         verbose=True,
+        # Stepwise planning config
+        stepwise=StepwisePlanningConfig(
+            max_steps=30,
+            action_history_limit=5,
+            include_page_context=True,
+        ),
     )
 
     # Create tracer
@@ -844,7 +856,7 @@ async def run_demo(
     )
 
     # Create automation task
-    task = create_automation_task(goal=goal, query=query)
+    task = create_automation_task(goal=goal, query=query, starting_url=starting_url)
 
     logger.info("=" * 60)
     logger.info("Starting PlannerExecutorAgent Demo")
@@ -857,9 +869,25 @@ async def run_demo(
     logger.info("=" * 60)
 
     # Run automation
+    # Grant common permissions to avoid browser permission prompts during automation.
+    # Supported permissions (may vary by browser version):
+    # - geolocation: store locators, local inventory
+    # - notifications: push notification prompts
+    # - clipboard-read/write: copy/paste functionality
+    # See: https://playwright.dev/python/docs/api/class-browsercontext#browser-context-grant-permissions
+    permission_policy = {
+        "auto_grant": [
+            "geolocation",
+            "notifications",
+            "clipboard-read",
+            "clipboard-write",
+        ],
+        "geolocation": {"latitude": 47.6762, "longitude": -122.2057},  # Kirkland, WA
+    }
     async with AsyncPredicateBrowser(
         api_key=predicate_api_key,
         headless=headless,
+        permission_policy=permission_policy,
     ) as browser:
         # AsyncSentienceBrowser creates a page in start() and stores it in browser.page
         page = browser.page
@@ -890,7 +918,11 @@ async def run_demo(
         )
 
         try:
-            result = await agent.run(runtime, task)
+            # Use stepwise or upfront planning based on flag
+            if stepwise:
+                result = await agent.run_stepwise(runtime, task)
+            else:
+                result = await agent.run(runtime, task)
 
             logger.info("=" * 60)
             logger.info("Run Complete")
@@ -947,6 +979,12 @@ def main():
         help="Search query for Amazon (e.g., 'wireless mouse')",
     )
     parser.add_argument(
+        "--url",
+        type=str,
+        default="https://www.amazon.com",
+        help="Starting URL (default: https://www.amazon.com)",
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         default=os.getenv("HEADLESS", "").lower() in {"1", "true", "yes"},
@@ -976,6 +1014,11 @@ def main():
         type=str,
         help=f"Executor model name (default: gpt-4o-mini or {DEFAULT_LOCAL_EXECUTOR_MODEL} for local)",
     )
+    parser.add_argument(
+        "--stepwise",
+        action="store_true",
+        help="Use stepwise (ReAct-style) planning instead of upfront planning",
+    )
 
     args = parser.parse_args()
 
@@ -991,11 +1034,13 @@ def main():
     result = asyncio.run(run_demo(
         goal=args.goal,
         query=args.query,
+        starting_url=args.url,
         headless=args.headless,
         use_local=args.local,
         planner_model=args.planner_model,
         executor_model=args.executor_model,
         provider_type=args.provider,
+        stepwise=args.stepwise,
     ))
 
     # Exit with appropriate code
