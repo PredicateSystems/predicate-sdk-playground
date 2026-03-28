@@ -37,6 +37,18 @@ export interface ActivityNote {
   text: string;
 }
 
+export interface ReviewItem {
+  id: string;
+  invoiceId: string;
+  vendor: string;
+  amount: number;
+  reasonCode: string;
+  reasonText: string;
+  assignedTo: string;
+  createdAt: string;
+  notes: ActivityNote[];
+}
+
 // Main invoice data - used across queue and detail pages
 export const INVOICES: Invoice[] = [
   {
@@ -248,5 +260,52 @@ export function getVendorByInvoiceId(invoiceId: string): VendorRecord | undefine
 
 // Format helpers
 export function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: 2,
+  }).format(amount);
 }
+
+// Review queue items - for manual review cases
+export const REVIEW_ITEMS: ReviewItem[] = [
+  {
+    id: 'REV-001',
+    invoiceId: 'INV-2024-005',
+    vendor: 'Cloud Hosting Pro',
+    amount: 15890.0,
+    reasonCode: 'amount_mismatch',
+    reasonText: 'Invoice amount differs from PO by $890.00',
+    assignedTo: 'Finance Team',
+    createdAt: '2024-04-08 14:32',
+    notes: [
+      {
+        author: 'System',
+        timestamp: '2024-04-08 14:32',
+        text: 'Auto-routed: amount mismatch detected during reconciliation.',
+      },
+    ],
+  },
+  {
+    id: 'REV-002',
+    invoiceId: 'INV-2024-002',
+    vendor: 'TechSupply Inc',
+    amount: 8750.5,
+    reasonCode: 'vendor_name_mismatch',
+    reasonText: 'Vendor name on invoice does not match PO vendor',
+    assignedTo: 'AP Manager',
+    createdAt: '2024-04-07 09:15',
+    notes: [
+      {
+        author: 'System',
+        timestamp: '2024-04-07 09:15',
+        text: 'Auto-routed: vendor name mismatch. Invoice shows "TechSupply Inc.", PO shows "Tech Supply Inc."',
+      },
+      {
+        author: 'Agent',
+        timestamp: '2024-04-07 09:18',
+        text: 'Attempted mark reconciled. Verification failed: status did not change.',
+      },
+    ],
+  },
+];

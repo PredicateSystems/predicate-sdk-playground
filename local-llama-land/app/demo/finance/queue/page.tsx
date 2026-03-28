@@ -3,18 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { INVOICES, formatCurrency } from '@/lib/finance-data';
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-yellow-500/20 text-yellow-300',
-  reconciled: 'bg-green-500/20 text-green-300',
-  needs_review: 'bg-red-500/20 text-red-300',
-};
-
-const PRIORITY_COLORS: Record<string, string> = {
-  high: 'text-red-400',
-  medium: 'text-yellow-400',
-  low: 'text-white/50',
-};
+import { StatusBadge } from '@/components/finance';
 
 export default function InvoiceQueuePage() {
   const [filter, setFilter] = useState<string>('all');
@@ -96,16 +85,11 @@ export default function InvoiceQueuePage() {
                   {formatCurrency(invoice.amount, invoice.currency)}
                 </td>
                 <td className="py-3 pr-4 text-white/70">{invoice.dueDate}</td>
-                <td className="py-3 pr-4">
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs ${STATUS_COLORS[invoice.status]}`}
-                    data-testid={`status-${invoice.id}`}
-                  >
-                    {invoice.status.replace('_', ' ')}
-                  </span>
+                <td className="py-3 pr-4" data-testid={`status-${invoice.id}`}>
+                  <StatusBadge status={invoice.status} variant="reconciliation" />
                 </td>
-                <td className={`py-3 pr-4 ${PRIORITY_COLORS[invoice.priority]}`}>
-                  {invoice.priority}
+                <td className="py-3 pr-4" data-testid={`priority-${invoice.id}`}>
+                  <StatusBadge status={invoice.priority} variant="priority" />
                 </td>
                 <td className="py-3 font-mono text-white/70">{invoice.poReference}</td>
               </tr>

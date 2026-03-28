@@ -1,49 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-
-// Hardcoded review queue data for deterministic demo
-const REVIEW_ITEMS = [
-  {
-    id: 'REV-001',
-    invoiceId: 'INV-2024-005',
-    vendor: 'Cloud Hosting Pro',
-    amount: 15890.0,
-    reasonCode: 'amount_mismatch',
-    reasonText: 'Invoice amount differs from PO by $890.00',
-    assignedTo: 'Finance Team',
-    createdAt: '2024-04-08 14:32',
-    notes: [
-      {
-        author: 'System',
-        timestamp: '2024-04-08 14:32',
-        text: 'Auto-routed: amount mismatch detected during reconciliation.',
-      },
-    ],
-  },
-  {
-    id: 'REV-002',
-    invoiceId: 'INV-2024-002',
-    vendor: 'TechSupply Inc',
-    amount: 8750.5,
-    reasonCode: 'vendor_name_mismatch',
-    reasonText: 'Vendor name on invoice does not match PO vendor',
-    assignedTo: 'AP Manager',
-    createdAt: '2024-04-07 09:15',
-    notes: [
-      {
-        author: 'System',
-        timestamp: '2024-04-07 09:15',
-        text: 'Auto-routed: vendor name mismatch. Invoice shows "TechSupply Inc.", PO shows "Tech Supply Inc."',
-      },
-      {
-        author: 'Agent',
-        timestamp: '2024-04-07 09:18',
-        text: 'Attempted mark reconciled. Verification failed: status did not change.',
-      },
-    ],
-  },
-];
+import { REVIEW_ITEMS, formatCurrency } from '@/lib/finance-data';
 
 const REASON_COLORS: Record<string, string> = {
   amount_mismatch: 'bg-orange-500/20 text-orange-300',
@@ -96,7 +54,7 @@ export default function ReviewQueuePage() {
                   </span>
                 </div>
                 <div className="text-white/60 text-sm mt-1">
-                  {item.vendor} · ${item.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                  {item.vendor} · {formatCurrency(item.amount)}
                 </div>
               </div>
               <div className="text-right text-sm text-white/50">
