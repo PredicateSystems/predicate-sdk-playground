@@ -5,6 +5,11 @@
 venv/
 env/
 
+# Node.js
+node_modules/
+.next/
+.turbo/
+
 # Screenshots and videos (generated at runtime)
 # Amazon Shopping demos
 amazon_shopping/demo1_sdk_llm/screenshots/
