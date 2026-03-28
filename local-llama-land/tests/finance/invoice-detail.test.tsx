@@ -1,13 +1,18 @@
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import InvoiceDetailPage from '../../app/demo/finance/invoices/[id]/page';
 
-// Mock next/navigation
+// Mock next/navigation - default to INV-2024-001
+const mockUseParams = vi.fn();
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ id: 'INV-2024-001' }),
+  useParams: () => mockUseParams(),
 }));
 
-describe('Invoice Detail Page', () => {
+describe('Invoice Detail Page - INV-2024-001', () => {
+  beforeEach(() => {
+    mockUseParams.mockReturnValue({ id: 'INV-2024-001' });
+  });
+
   it('renders the invoice number in the header', () => {
     render(<InvoiceDetailPage />);
     expect(screen.getByTestId('invoice-number')).toHaveTextContent('INV-2024-001');
@@ -64,10 +69,19 @@ describe('Invoice Detail Page', () => {
   });
 });
 
-describe('Invoice Detail Page - Mismatch Invoice', () => {
+describe('Invoice Detail Page - INV-2024-002 (Mismatch)', () => {
   beforeEach(() => {
-    vi.mock('next/navigation', () => ({
-      useParams: () => ({ id: 'INV-2024-002' }),
-    }));
+    mockUseParams.mockReturnValue({ id: 'INV-2024-002' });
+  });
+
+  it('shows mismatch warning for invoice with mismatch', () => {
+    render(<InvoiceDetailPage />);
+    expect(screen.getByTestId('mismatch-warning')).toBeInTheDocument();
+    expect(screen.getByTestId('mismatch-warning')).toHaveTextContent('Mismatch Detected');
+  });
+
+  it('displays the correct vendor name', () => {
+    render(<InvoiceDetailPage />);
+    expect(screen.getByTestId('invoice-vendor')).toHaveTextContent('TechSupply Inc');
   });
 });

@@ -2,13 +2,34 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { StatusBadge, FieldRow, ActivityPanel } from '@/components/finance';
-import { getInvoiceById, formatCurrency } from '@/lib/finance-data';
+import { useState } from 'react';
+import {
+  StatusBadge,
+  FieldRow,
+  ActivityPanel,
+  ReconciliationModal,
+  ReleasePaymentModal,
+  AddNoteModal,
+} from '@/components/finance';
+import { getInvoiceById, formatCurrency, type ActivityNote } from '@/lib/finance-data';
+
+// High-value threshold for payment policy
+const PAYMENT_THRESHOLD = 10000;
 
 export default function InvoiceDetailPage() {
   const params = useParams();
   const invoiceId = params.id as string;
   const invoice = getInvoiceById(invoiceId);
+
+  // Local state for reconciliation status (allows UI updates without backend)
+  const [reconciliationStatus, setReconciliationStatus] = useState(invoice?.status ?? 'pending');
+  const [paymentStatus, setPaymentStatus] = useState(invoice?.paymentStatus ?? 'unpaid');
+  const [localNotes, setLocalNotes] = useState<ActivityNote[]>(invoice?.notes ?? []);
+
+  // Modal states
+  const [isReconciliationModalOpen, setIsReconciliationModalOpen] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isAddNoteModalOpen, setIsAddNoteModalOpen] = useState(false);
 
   if (!invoice) {
     return (
@@ -23,6 +44,66 @@ export default function InvoiceDetailPage() {
       </div>
     );
   }
+
+  // Determine if this invoice will silently fail reconciliation
+  const willSilentlyFail = invoice.mismatch;
+
+  // Determine if this is a high-value invoice (policy will deny payment)
+  const isHighValue = invoice.amount > PAYMENT_THRESHOLD;
+
+  // Generate timestamp for notes
+  const getTimestamp = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
+
+  const handleMarkReconciled = () => {
+    setIsReconciliationModalOpen(true);
+  };
+
+  const handleConfirmReconciliation = () => {
+    setReconciliationStatus('reconciled');
+    setLocalNotes((prev) => [
+      ...prev,
+      {
+        author: 'Agent',
+        timestamp: getTimestamp(),
+        text: 'Reconciliation completed successfully.',
+      },
+    ]);
+  };
+
+  const handleRouteToReview = () => {
+    // This action always works - it's the "corrected bounded action" in the demo
+    setReconciliationStatus('needs_review');
+    setLocalNotes((prev) => [
+      ...prev,
+      {
+        author: 'Agent',
+        timestamp: getTimestamp(),
+        text: 'Routed to review queue for manual inspection.',
+      },
+    ]);
+  };
+
+  const handleReleasePayment = () => {
+    setIsPaymentModalOpen(true);
+  };
+
+  const handleAddNote = () => {
+    setIsAddNoteModalOpen(true);
+  };
+
+  const handleNoteSubmit = (noteText: string) => {
+    setLocalNotes((prev) => [
+      ...prev,
+      {
+        author: 'Agent',
+        timestamp: getTimestamp(),
+        text: noteText,
+      },
+    ]);
+  };
+
+  // Count notes for display
+  const noteCount = localNotes.length;
 
   return (
     <div className="space-y-6" data-testid="invoice-detail-page">
@@ -89,7 +170,16 @@ export default function InvoiceDetailPage() {
               />
               <FieldRow
                 label="Amount"
-                value={formatCurrency(invoice.amount, invoice.currency)}
+                value={
+                  <span className={isHighValue ? 'text-orange-400' : ''}>
+                    {formatCurrency(invoice.amount, invoice.currency)}
+                    {isHighValue && (
+                      <span className="ml-2 text-xs text-orange-400" data-testid="high-value-flag">
+                        (High Value)
+                      </span>
+                    )}
+                  </span>
+                }
                 testId="field-amount"
               />
               <FieldRow
@@ -123,12 +213,12 @@ export default function InvoiceDetailPage() {
             <div className="space-y-1">
               <FieldRow
                 label="Reconciliation Status"
-                value={<StatusBadge status={invoice.status} variant="reconciliation" />}
+                value={<StatusBadge status={reconciliationStatus} variant="reconciliation" />}
                 testId="field-reconciliation-status"
               />
               <FieldRow
                 label="Payment Status"
-                value={<StatusBadge status={invoice.paymentStatus} variant="payment" />}
+                value={<StatusBadge status={paymentStatus} variant="payment" />}
                 testId="field-payment-status"
               />
               <FieldRow
@@ -141,7 +231,18 @@ export default function InvoiceDetailPage() {
 
           {/* Activity / Notes */}
           <div className="p-5 rounded-lg border border-white/20 bg-white/5">
-            <ActivityPanel notes={invoice.notes} />
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-white/70 uppercase tracking-wide">
+                Activity
+              </h3>
+              <span
+                className="text-xs text-white/50 bg-white/10 px-2 py-0.5 rounded"
+                data-testid="note-count"
+              >
+                {noteCount} {noteCount === 1 ? 'note' : 'notes'}
+              </span>
+            </div>
+            <ActivityPanel notes={localNotes} title="" />
           </div>
         </div>
 
@@ -153,25 +254,34 @@ export default function InvoiceDetailPage() {
             </h2>
             <div className="space-y-2">
               <button
+                onClick={handleMarkReconciled}
                 className="w-full px-4 py-2 text-sm rounded bg-green-600 hover:bg-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="action-mark-reconciled"
-                disabled={invoice.status === 'reconciled'}
+                disabled={reconciliationStatus === 'reconciled'}
               >
                 Mark Reconciled
               </button>
               <button
-                className="w-full px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors"
+                onClick={handleRouteToReview}
+                className="w-full px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="action-route-to-review"
+                disabled={reconciliationStatus === 'needs_review'}
               >
                 Route To Review
               </button>
               <button
-                className="w-full px-4 py-2 text-sm rounded bg-orange-600 hover:bg-orange-500 transition-colors"
+                onClick={handleReleasePayment}
+                className="w-full px-4 py-2 text-sm rounded bg-orange-600 hover:bg-orange-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="action-release-payment"
+                disabled={paymentStatus !== 'unpaid'}
               >
                 Release Payment
+                {isHighValue && (
+                  <span className="ml-1 text-xs opacity-70">(Requires Approval)</span>
+                )}
               </button>
               <button
+                onClick={handleAddNote}
                 className="w-full px-4 py-2 text-sm rounded bg-white/10 hover:bg-white/20 transition-colors"
                 data-testid="action-add-note"
               >
@@ -201,8 +311,45 @@ export default function InvoiceDetailPage() {
               </Link>
             </div>
           </div>
+
+          {/* Debug Info - Hidden but testable */}
+          <div
+            className="hidden"
+            data-testid="debug-info"
+            data-current-status={reconciliationStatus}
+            data-payment-status={paymentStatus}
+            data-will-silently-fail={willSilentlyFail ? 'true' : 'false'}
+            data-is-high-value={isHighValue ? 'true' : 'false'}
+            data-invoice-id={invoice.id}
+            data-note-count={noteCount}
+          />
         </div>
       </div>
+
+      {/* Modals */}
+      <ReconciliationModal
+        isOpen={isReconciliationModalOpen}
+        onClose={() => setIsReconciliationModalOpen(false)}
+        onConfirm={handleConfirmReconciliation}
+        invoiceId={invoice.id}
+        willSilentlyFail={willSilentlyFail}
+      />
+
+      <ReleasePaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        invoiceId={invoice.id}
+        amount={invoice.amount}
+        currency={invoice.currency}
+        isHighValue={isHighValue}
+      />
+
+      <AddNoteModal
+        isOpen={isAddNoteModalOpen}
+        onClose={() => setIsAddNoteModalOpen(false)}
+        onAddNote={handleNoteSubmit}
+        invoiceId={invoice.id}
+      />
     </div>
   );
 }
