@@ -15,7 +15,16 @@ export function Navbar() {
         </Link>
         <div className="hidden flex-1 px-6 text-center md:block">
           <p className="text-xs text-white/50">
-            A public SPA playground for testing browser agents.
+            A public SPA playground app for{' '}
+            <a
+              href="https://www.predicatesystems.ai"
+              target="_blank"
+              rel="noreferrer"
+              className="text-white/70 underline underline-offset-2 hover:text-white"
+            >
+              Predicate Systems
+            </a>
+            .
             <br />
             Includes delayed hydration, dynamic state, and realistic login flows.
           </p>
