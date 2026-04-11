@@ -90,10 +90,10 @@ from providers import (
     create_planner_executor_providers,
 )
 from heuristics import get_heuristics_for_domain
-from overlay_utils import dismiss_overlays_before_agent
 
 # SDK imports
 from predicate import AsyncPredicateBrowser
+from predicate.overlay_dismissal import dismiss_overlays_before_agent
 from predicate.agent_runtime import AgentRuntime
 from predicate.agents import (
     AutomationTask,

@@ -1,16 +1,20 @@
 """
 LLM Provider Factory for Generic Browser Agent Demo.
 
-This module provides a unified interface for creating LLM providers,
-supporting multiple backends:
-- OpenAI API (GPT-4o, GPT-4o-mini)
-- DeepInfra (Qwen, Llama, Mistral)
-- Ollama (local models)
-- MLX (Apple Silicon local models)
-- HuggingFace Transformers (local models)
+This module provides convenient factory functions for creating LLM providers
+with pre-configured model defaults for different backends.
 
-The PlannerExecutorAgent works with any LLMProvider implementation,
-making it easy to swap between cloud and local models.
+Most providers are imported from the SDK. This module adds:
+- MLXProvider for Apple Silicon local text models (SDK only has MLXVLMProvider for vision)
+- Pre-configured model presets for quick setup
+- Factory function for creating planner/executor pairs
+
+For basic usage, prefer the SDK's create_planner_executor_agent() function:
+    from predicate.agents import create_planner_executor_agent
+    agent = create_planner_executor_agent(
+        planner_model="gpt-4o",
+        executor_model="gpt-4o-mini",
+    )
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+# Import providers from SDK
+from predicate.llm_provider import LLMProvider, LLMResponse, OllamaProvider, OpenAIProvider
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +39,6 @@ class ProviderType(str, Enum):
     DEEPINFRA = "deepinfra"
     OLLAMA = "ollama"
     MLX = "mlx"
-    HUGGINGFACE = "huggingface"
 
 
 @dataclass
@@ -48,7 +54,7 @@ class ModelConfig:
 
 
 # =============================================================================
-# Default Model Configurations
+# Pre-configured Model Defaults
 # =============================================================================
 
 # Cloud models (recommended for best quality)
@@ -66,8 +72,7 @@ CLOUD_MODELS = {
 
 # DeepInfra models (good quality, lower cost)
 # Note: Use Mistral for executor - Qwen models enter "thinking mode" and output
-# <think> tags instead of actions, even when instructed not to. Mistral provides
-# direct action responses without reasoning. This matches webbench configuration.
+# <think> tags instead of actions. Mistral provides direct action responses.
 DEEPINFRA_MODELS = {
     "planner": ModelConfig(
         provider=ProviderType.DEEPINFRA,
@@ -111,280 +116,109 @@ OLLAMA_MODELS = {
 }
 
 
-def _get_sdk_path():
-    """Get the SDK path for imports."""
-    from pathlib import Path
-    return Path(__file__).parent.parent.parent / "sdk-python"
-
-
-def _ensure_sdk_imports():
-    """Ensure SDK is importable."""
-    import sys
-    sdk_path = _get_sdk_path()
-    if str(sdk_path) not in sys.path:
-        sys.path.insert(0, str(sdk_path))
-
-
 # =============================================================================
-# Provider Implementations
+# MLX Provider (not in SDK - SDK only has MLXVLMProvider for vision)
 # =============================================================================
 
 
-def create_openai_provider(config: ModelConfig):
-    """Create an OpenAI provider."""
-    _ensure_sdk_imports()
-    from predicate.llm_provider import OpenAIProvider
-
-    api_key = config.api_key or os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
-
-    return OpenAIProvider(
-        model=config.model_name,
-        api_key=api_key,
-    )
-
-
-def create_deepinfra_provider(config: ModelConfig):
-    """Create a DeepInfra provider (OpenAI-compatible)."""
-    _ensure_sdk_imports()
-    from predicate.llm_provider import OpenAIProvider
-
-    api_key = config.api_key or os.getenv("DEEPINFRA_API_KEY")
-    if not api_key:
-        raise ValueError("DEEPINFRA_API_KEY environment variable is required")
-
-    return OpenAIProvider(
-        model=config.model_name,
-        api_key=api_key,
-        base_url=config.base_url or "https://api.deepinfra.com/v1/openai",
-    )
-
-
-def create_ollama_provider(config: ModelConfig):
-    """Create an Ollama provider for local models."""
-    _ensure_sdk_imports()
-    from predicate.llm_provider import OllamaProvider
-
-    return OllamaProvider(
-        model=config.model_name,
-        base_url=config.base_url or "http://localhost:11434",
-    )
-
-
-def create_mlx_provider(config: ModelConfig):
+class MLXProvider(LLMProvider):
     """
-    Create an MLX provider for Apple Silicon local models.
+    MLX-based local LLM provider for Apple Silicon (text-only).
+
+    This is for text generation models. For vision models, use SDK's MLXVLMProvider.
 
     Requires: pip install mlx-lm
     """
-    _ensure_sdk_imports()
-    from predicate.llm_provider import LLMProvider, LLMResponse
 
-    class MLXProvider(LLMProvider):
-        """MLX-based local LLM provider for Apple Silicon."""
+    def __init__(self, model: str, max_tokens: int = 2048, temperature: float = 0.0):
+        super().__init__(model)
+        self._model_name_str = model
+        self._default_max_tokens = max_tokens
+        self._default_temperature = temperature
 
-        def __init__(self, model: str):
-            super().__init__(model)
-            self._model_name_str = model
+        try:
+            self._mlx_lm = importlib.import_module("mlx_lm")
+        except ImportError as exc:
+            raise RuntimeError(
+                "mlx-lm is required for MLX models. Install with: pip install mlx-lm"
+            ) from exc
 
+        load_fn = getattr(self._mlx_lm, "load", None)
+        if not load_fn:
+            raise RuntimeError("mlx_lm.load not available")
+
+        logger.info(f"Loading MLX model: {model}")
+        self.model, self.tokenizer = load_fn(model)
+        logger.info(f"MLX model loaded: {model}")
+
+    def _build_prompt(self, system: str, user: str) -> str:
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
+        if callable(apply_chat_template):
+            kwargs: dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
+            # Disable thinking mode for Qwen 3 models
+            if "qwen3" in self._model_name_str.lower():
+                kwargs["enable_thinking"] = False
+            return apply_chat_template(messages, **kwargs)
+        return f"{system}\n\n{user}"
+
+    def generate(self, system_prompt: str, user_prompt: str, **kwargs) -> LLMResponse:
+        prompt = self._build_prompt(system_prompt, user_prompt)
+
+        generate_fn = getattr(self._mlx_lm, "generate", None)
+        if not generate_fn:
+            raise RuntimeError("mlx_lm.generate not available")
+
+        max_tokens = kwargs.get("max_tokens", self._default_max_tokens)
+        temperature = kwargs.get("temperature", self._default_temperature)
+
+        gen_kwargs: dict[str, Any] = {"max_tokens": max_tokens}
+        if temperature and temperature > 0:
             try:
-                self._mlx_lm = importlib.import_module("mlx_lm")
-            except ImportError as exc:
-                raise RuntimeError(
-                    "mlx-lm is required for MLX models. Install with: pip install mlx-lm"
-                ) from exc
-
-            load_fn = getattr(self._mlx_lm, "load", None)
-            if not load_fn:
-                raise RuntimeError("mlx_lm.load not available")
-
-            logger.info(f"Loading MLX model: {model}")
-            self.model, self.tokenizer = load_fn(model)
-            logger.info(f"MLX model loaded: {model}")
-
-        def _build_prompt(self, system: str, user: str) -> str:
-            messages = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ]
-            apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
-            if callable(apply_chat_template):
-                kwargs: dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
-                # Disable thinking mode for Qwen 3 models
-                if "qwen3" in self._model_name_str.lower():
-                    kwargs["enable_thinking"] = False
-                return apply_chat_template(messages, **kwargs)
-            return f"{system}\n\n{user}"
-
-        def generate(self, system_prompt: str, user_prompt: str, **kwargs) -> LLMResponse:
-            prompt = self._build_prompt(system_prompt, user_prompt)
-
-            generate_fn = getattr(self._mlx_lm, "generate", None)
-            if not generate_fn:
-                raise RuntimeError("mlx_lm.generate not available")
-
-            max_tokens = kwargs.get("max_tokens", config.max_tokens)
-            temperature = kwargs.get("temperature", config.temperature)
-
-            gen_kwargs: dict[str, Any] = {"max_tokens": max_tokens}
-            if temperature and temperature > 0:
-                try:
-                    sample_utils = importlib.import_module("mlx_lm.sample_utils")
-                    make_sampler = getattr(sample_utils, "make_sampler", None)
-                    if callable(make_sampler):
-                        gen_kwargs["sampler"] = make_sampler(temp=temperature)
-                except Exception:
-                    pass
-
-            text = generate_fn(self.model, self.tokenizer, prompt, **gen_kwargs)
-
-            try:
-                prompt_tokens = len(self.tokenizer.encode(prompt))
-                completion_tokens = len(self.tokenizer.encode(text.strip()))
+                sample_utils = importlib.import_module("mlx_lm.sample_utils")
+                make_sampler = getattr(sample_utils, "make_sampler", None)
+                if callable(make_sampler):
+                    gen_kwargs["sampler"] = make_sampler(temp=temperature)
             except Exception:
-                prompt_tokens = 0
-                completion_tokens = 0
+                pass
 
-            return LLMResponse(
-                content=text.strip(),
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
-                model_name=self._model_name_str,
-            )
+        text = generate_fn(self.model, self.tokenizer, prompt, **gen_kwargs)
 
-        def supports_json_mode(self) -> bool:
-            return False
+        try:
+            prompt_tokens = len(self.tokenizer.encode(prompt))
+            completion_tokens = len(self.tokenizer.encode(text.strip()))
+        except Exception:
+            prompt_tokens = 0
+            completion_tokens = 0
 
-        @property
-        def model_name(self) -> str:
-            return self._model_name_str
+        return LLMResponse(
+            content=text.strip(),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            model_name=self._model_name_str,
+        )
 
-        def supports_vision(self) -> bool:
-            return False
+    def supports_json_mode(self) -> bool:
+        return False
 
-    return MLXProvider(config.model_name)
+    @property
+    def model_name(self) -> str:
+        return self._model_name_str
 
-
-def create_huggingface_provider(config: ModelConfig):
-    """
-    Create a HuggingFace Transformers provider.
-
-    Requires: pip install torch transformers
-    """
-    _ensure_sdk_imports()
-    from predicate.llm_provider import LLMProvider, LLMResponse
-
-    class HuggingFaceProvider(LLMProvider):
-        """HuggingFace Transformers-based local LLM provider."""
-
-        def __init__(self, model: str):
-            super().__init__(model)
-            self._model_name_str = model
-
-            try:
-                import torch
-                from transformers import AutoModelForCausalLM, AutoTokenizer
-            except ImportError as exc:
-                raise RuntimeError(
-                    "torch and transformers are required. Install with: pip install torch transformers"
-                ) from exc
-
-            self._torch = torch
-
-            # Determine device
-            if torch.backends.mps.is_available():
-                device_map = "mps"
-                torch_dtype = torch.bfloat16
-            elif torch.cuda.is_available():
-                device_map = "auto"
-                torch_dtype = torch.float16
-            else:
-                device_map = "cpu"
-                torch_dtype = torch.float32
-
-            logger.info(f"Loading HuggingFace model: {model} (device={device_map})")
-            self.tokenizer = AutoTokenizer.from_pretrained(model, use_fast=True)
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model,
-                device_map=device_map,
-                torch_dtype=torch_dtype,
-                low_cpu_mem_usage=True,
-            )
-            logger.info(f"HuggingFace model loaded: {model}")
-
-        def generate(self, system_prompt: str, user_prompt: str, **kwargs) -> LLMResponse:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
-
-            encoding = self.tokenizer.apply_chat_template(
-                messages, return_tensors="pt", add_generation_prompt=True
-            )
-
-            device = getattr(self.model, "device", "cpu")
-            try:
-                input_ids = encoding["input_ids"].to(device)
-                attention_mask = encoding.get("attention_mask")
-                if attention_mask is not None:
-                    attention_mask = attention_mask.to(device)
-            except (TypeError, KeyError):
-                input_ids = encoding.to(device)
-                attention_mask = self._torch.ones_like(input_ids)
-
-            max_tokens = kwargs.get("max_tokens", config.max_tokens)
-            temperature = kwargs.get("temperature", config.temperature)
-            do_sample = temperature > 0
-
-            output_ids = self.model.generate(
-                input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_tokens,
-                do_sample=do_sample,
-                temperature=temperature if do_sample else None,
-                pad_token_id=self.tokenizer.eos_token_id,
-            )
-
-            generated = output_ids[0][input_ids.shape[-1]:]
-            text = self.tokenizer.decode(generated, skip_special_tokens=True)
-
-            return LLMResponse(
-                content=text.strip(),
-                prompt_tokens=int(input_ids.shape[-1]),
-                completion_tokens=int(generated.shape[-1]),
-                total_tokens=int(input_ids.shape[-1]) + int(generated.shape[-1]),
-                model_name=self._model_name_str,
-            )
-
-        def supports_json_mode(self) -> bool:
-            return False
-
-        @property
-        def model_name(self) -> str:
-            return self._model_name_str
-
-        def supports_vision(self) -> bool:
-            return False
-
-    return HuggingFaceProvider(config.model_name)
+    def supports_vision(self) -> bool:
+        return False
 
 
 # =============================================================================
-# Factory Function
+# Provider Factory Functions
 # =============================================================================
 
-PROVIDER_FACTORIES = {
-    ProviderType.OPENAI: create_openai_provider,
-    ProviderType.DEEPINFRA: create_deepinfra_provider,
-    ProviderType.OLLAMA: create_ollama_provider,
-    ProviderType.MLX: create_mlx_provider,
-    ProviderType.HUGGINGFACE: create_huggingface_provider,
-}
 
-
-def create_provider(config: ModelConfig):
+def create_provider(config: ModelConfig) -> LLMProvider:
     """
     Create an LLM provider from configuration.
 
@@ -393,67 +227,73 @@ def create_provider(config: ModelConfig):
 
     Returns:
         LLMProvider instance
-
-    Example:
-        provider = create_provider(ModelConfig(
-            provider=ProviderType.OPENAI,
-            model_name="gpt-4o",
-        ))
     """
-    factory = PROVIDER_FACTORIES.get(config.provider)
-    if not factory:
+    if config.provider == ProviderType.OPENAI:
+        api_key = config.api_key or os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is required")
+        return OpenAIProvider(model=config.model_name, api_key=api_key)
+
+    elif config.provider == ProviderType.DEEPINFRA:
+        api_key = config.api_key or os.getenv("DEEPINFRA_API_KEY")
+        if not api_key:
+            raise ValueError("DEEPINFRA_API_KEY environment variable is required")
+        return OpenAIProvider(
+            model=config.model_name,
+            api_key=api_key,
+            base_url=config.base_url or "https://api.deepinfra.com/v1/openai",
+        )
+
+    elif config.provider == ProviderType.OLLAMA:
+        return OllamaProvider(
+            model=config.model_name,
+            base_url=config.base_url or "http://localhost:11434",
+        )
+
+    elif config.provider == ProviderType.MLX:
+        return MLXProvider(
+            model=config.model_name,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+        )
+
+    else:
         raise ValueError(f"Unknown provider type: {config.provider}")
-    return factory(config)
 
 
-def _base_configs_for_mode(mode: str) -> dict[str, ModelConfig]:
-    """Return default planner/executor configs for a provider mode."""
+def _get_base_configs(mode: str) -> dict[str, ModelConfig]:
+    """Get base configs for a provider mode."""
     if mode == "cloud" or mode == "openai":
         return CLOUD_MODELS
-    if mode == "deepinfra":
+    elif mode == "deepinfra":
         return DEEPINFRA_MODELS
-    if mode == "ollama":
+    elif mode == "ollama":
         return OLLAMA_MODELS
-    if mode == "mlx":
+    elif mode == "mlx":
         return MLX_MODELS
-    if mode == "huggingface" or mode == "hf":
-        return {
-            "planner": ModelConfig(
-                provider=ProviderType.HUGGINGFACE,
-                model_name="Qwen/Qwen2.5-7B-Instruct",
-            ),
-            "executor": ModelConfig(
-                provider=ProviderType.HUGGINGFACE,
-                model_name="Qwen/Qwen2.5-3B-Instruct",
-                max_tokens=96,
-            ),
-        }
-    raise ValueError(f"Unknown mode: {mode}. Use: cloud, deepinfra, ollama, mlx, huggingface")
+    else:
+        raise ValueError(f"Unknown mode: {mode}. Use: cloud, deepinfra, ollama, mlx")
 
 
-def _clone_model_config(config: ModelConfig) -> ModelConfig:
-    """Copy a model config so caller overrides don't mutate defaults."""
-    return ModelConfig(
-        provider=config.provider,
-        model_name=config.model_name,
-        api_key=config.api_key,
-        base_url=config.base_url,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-    )
-
-
-def _provider_override_config(provider_name: str, role: str) -> ModelConfig:
-    """Get the default config for a specific provider/role pair."""
-    provider_type = ProviderType(provider_name)
+def _get_provider_config(provider_name: str, role: str) -> ModelConfig:
+    """Get default config for a specific provider/role pair."""
     configs_by_provider = {
-        ProviderType.OPENAI: CLOUD_MODELS,
-        ProviderType.DEEPINFRA: DEEPINFRA_MODELS,
-        ProviderType.OLLAMA: OLLAMA_MODELS,
-        ProviderType.MLX: MLX_MODELS,
-        ProviderType.HUGGINGFACE: _base_configs_for_mode("huggingface"),
+        "openai": CLOUD_MODELS,
+        "deepinfra": DEEPINFRA_MODELS,
+        "ollama": OLLAMA_MODELS,
+        "mlx": MLX_MODELS,
     }
-    return _clone_model_config(configs_by_provider[provider_type][role])
+    if provider_name not in configs_by_provider:
+        raise ValueError(f"Unknown provider: {provider_name}")
+    base = configs_by_provider[provider_name][role]
+    return ModelConfig(
+        provider=base.provider,
+        model_name=base.model_name,
+        api_key=base.api_key,
+        base_url=base.base_url,
+        temperature=base.temperature,
+        max_tokens=base.max_tokens,
+    )
 
 
 def create_planner_executor_providers(
@@ -462,30 +302,59 @@ def create_planner_executor_providers(
     executor_model: str | None = None,
     planner_provider: str | None = None,
     executor_provider: str | None = None,
-):
+) -> tuple[LLMProvider, LLMProvider]:
     """
     Create planner and executor providers based on mode.
 
     Args:
-        mode: "cloud" (OpenAI), "deepinfra", "ollama", "mlx", or "huggingface"
+        mode: "cloud" (OpenAI), "deepinfra", "ollama", or "mlx"
         planner_model: Override planner model name
         executor_model: Override executor model name
+        planner_provider: Override planner provider (e.g., "openai", "deepinfra")
+        executor_provider: Override executor provider
 
     Returns:
         Tuple of (planner_provider, executor_provider)
 
     Example:
+        # Use deepinfra for both
         planner, executor = create_planner_executor_providers(mode="deepinfra")
+
+        # Mix providers: OpenAI planner, DeepInfra executor
+        planner, executor = create_planner_executor_providers(
+            mode="cloud",
+            executor_provider="deepinfra",
+        )
     """
-    base_configs = _base_configs_for_mode(mode)
-    planner_config = _clone_model_config(base_configs["planner"])
-    executor_config = _clone_model_config(base_configs["executor"])
+    # Get base configs for mode
+    base_configs = _get_base_configs(mode)
 
+    # Start with base configs, then apply provider overrides
     if planner_provider:
-        planner_config = _provider_override_config(planner_provider, "planner")
-    if executor_provider:
-        executor_config = _provider_override_config(executor_provider, "executor")
+        planner_config = _get_provider_config(planner_provider, "planner")
+    else:
+        planner_config = ModelConfig(
+            provider=base_configs["planner"].provider,
+            model_name=base_configs["planner"].model_name,
+            api_key=base_configs["planner"].api_key,
+            base_url=base_configs["planner"].base_url,
+            temperature=base_configs["planner"].temperature,
+            max_tokens=base_configs["planner"].max_tokens,
+        )
 
+    if executor_provider:
+        executor_config = _get_provider_config(executor_provider, "executor")
+    else:
+        executor_config = ModelConfig(
+            provider=base_configs["executor"].provider,
+            model_name=base_configs["executor"].model_name,
+            api_key=base_configs["executor"].api_key,
+            base_url=base_configs["executor"].base_url,
+            temperature=base_configs["executor"].temperature,
+            max_tokens=base_configs["executor"].max_tokens,
+        )
+
+    # Apply model name overrides
     if planner_model:
         planner_config = ModelConfig(
             provider=planner_config.provider,

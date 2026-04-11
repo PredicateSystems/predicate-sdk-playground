@@ -1,22 +1,21 @@
-from pathlib import Path
-import sys
-from unittest.mock import AsyncMock, patch
+"""Tests for overlay dismissal utilities (now in SDK)."""
 
-sys.path.insert(0, str(Path(__file__).parent))
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from overlay_utils import dismiss_overlays_before_agent
+from predicate.overlay_dismissal import dismiss_overlays_before_agent
 
 
 @pytest.mark.asyncio
 async def test_dismiss_overlays_before_agent_passes_use_api_through() -> None:
+    """Test that dismiss_overlays_before_agent passes parameters correctly."""
     dismiss_overlays = AsyncMock(return_value=object())
 
     runtime = object()
     browser = object()
 
-    with patch("overlay_utils.dismiss_overlays", dismiss_overlays):
+    with patch("predicate.overlay_dismissal.dismiss_overlays", dismiss_overlays):
         result = await dismiss_overlays_before_agent(
             runtime,
             browser,
