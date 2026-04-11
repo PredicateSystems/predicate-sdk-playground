@@ -1,0 +1,64 @@
+# Core dependencies
+python-dotenv>=1.0.0
+
+# =============================================================================
+# SDK Installation
+# =============================================================================
+# Install the Predicate SDK from local path:
+#   pip install -e ../../sdk-python
+#
+# Or from PyPI (when published):
+#   pip install predicate-runtime
+
+# =============================================================================
+# LLM Providers
+# =============================================================================
+
+# OpenAI (default provider)
+# Requires: OPENAI_API_KEY environment variable
+openai>=1.0.0
+
+# DeepInfra (uses OpenAI-compatible API)
+# Requires: DEEPINFRA_API_KEY environment variable
+# No additional packages needed - uses openai package
+
+# =============================================================================
+# Local LLM Providers (Optional)
+# =============================================================================
+
+# Ollama - local models via Ollama server
+# Requires: Ollama running locally (ollama serve)
+# No additional packages needed - SDK has built-in OllamaProvider
+
+# MLX - Apple Silicon optimized models
+# Uncomment to enable:
+# mlx-lm>=0.10.0
+
+# HuggingFace Transformers - cross-platform local models
+# Uncomment to enable:
+# torch>=2.0.0
+# transformers>=4.30.0
+
+# =============================================================================
+# Recommended Models by Provider
+# =============================================================================
+#
+# OpenAI:
+#   Planner: gpt-4o
+#   Executor: gpt-4o-mini
+#
+# DeepInfra:
+#   Planner: Qwen/Qwen3.5-27B
+#   Executor: Qwen/Qwen3.5-9B
+#
+# Ollama:
+#   Planner: qwen2.5:14b
+#   Executor: qwen2.5:7b
+#
+# MLX (Apple Silicon):
+#   Planner: mlx-community/Qwen3-8B-4bit
+#   Executor: mlx-community/Qwen3-4B-4bit
+#
+# HuggingFace:
+#   Planner: Qwen/Qwen2.5-7B-Instruct
+#   Executor: Qwen/Qwen2.5-3B-Instruct
