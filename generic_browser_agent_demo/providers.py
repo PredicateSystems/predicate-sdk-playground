@@ -406,10 +406,62 @@ def create_provider(config: ModelConfig):
     return factory(config)
 
 
+def _base_configs_for_mode(mode: str) -> dict[str, ModelConfig]:
+    """Return default planner/executor configs for a provider mode."""
+    if mode == "cloud" or mode == "openai":
+        return CLOUD_MODELS
+    if mode == "deepinfra":
+        return DEEPINFRA_MODELS
+    if mode == "ollama":
+        return OLLAMA_MODELS
+    if mode == "mlx":
+        return MLX_MODELS
+    if mode == "huggingface" or mode == "hf":
+        return {
+            "planner": ModelConfig(
+                provider=ProviderType.HUGGINGFACE,
+                model_name="Qwen/Qwen2.5-7B-Instruct",
+            ),
+            "executor": ModelConfig(
+                provider=ProviderType.HUGGINGFACE,
+                model_name="Qwen/Qwen2.5-3B-Instruct",
+                max_tokens=96,
+            ),
+        }
+    raise ValueError(f"Unknown mode: {mode}. Use: cloud, deepinfra, ollama, mlx, huggingface")
+
+
+def _clone_model_config(config: ModelConfig) -> ModelConfig:
+    """Copy a model config so caller overrides don't mutate defaults."""
+    return ModelConfig(
+        provider=config.provider,
+        model_name=config.model_name,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        temperature=config.temperature,
+        max_tokens=config.max_tokens,
+    )
+
+
+def _provider_override_config(provider_name: str, role: str) -> ModelConfig:
+    """Get the default config for a specific provider/role pair."""
+    provider_type = ProviderType(provider_name)
+    configs_by_provider = {
+        ProviderType.OPENAI: CLOUD_MODELS,
+        ProviderType.DEEPINFRA: DEEPINFRA_MODELS,
+        ProviderType.OLLAMA: OLLAMA_MODELS,
+        ProviderType.MLX: MLX_MODELS,
+        ProviderType.HUGGINGFACE: _base_configs_for_mode("huggingface"),
+    }
+    return _clone_model_config(configs_by_provider[provider_type][role])
+
+
 def create_planner_executor_providers(
     mode: str = "cloud",
     planner_model: str | None = None,
     executor_model: str | None = None,
+    planner_provider: str | None = None,
+    executor_provider: str | None = None,
 ):
     """
     Create planner and executor providers based on mode.
@@ -425,33 +477,14 @@ def create_planner_executor_providers(
     Example:
         planner, executor = create_planner_executor_providers(mode="deepinfra")
     """
-    # Select base configs
-    if mode == "cloud" or mode == "openai":
-        base_configs = CLOUD_MODELS
-    elif mode == "deepinfra":
-        base_configs = DEEPINFRA_MODELS
-    elif mode == "ollama":
-        base_configs = OLLAMA_MODELS
-    elif mode == "mlx":
-        base_configs = MLX_MODELS
-    elif mode == "huggingface" or mode == "hf":
-        base_configs = {
-            "planner": ModelConfig(
-                provider=ProviderType.HUGGINGFACE,
-                model_name="Qwen/Qwen2.5-7B-Instruct",
-            ),
-            "executor": ModelConfig(
-                provider=ProviderType.HUGGINGFACE,
-                model_name="Qwen/Qwen2.5-3B-Instruct",
-                max_tokens=96,
-            ),
-        }
-    else:
-        raise ValueError(f"Unknown mode: {mode}. Use: cloud, deepinfra, ollama, mlx, huggingface")
+    base_configs = _base_configs_for_mode(mode)
+    planner_config = _clone_model_config(base_configs["planner"])
+    executor_config = _clone_model_config(base_configs["executor"])
 
-    # Apply overrides
-    planner_config = base_configs["planner"]
-    executor_config = base_configs["executor"]
+    if planner_provider:
+        planner_config = _provider_override_config(planner_provider, "planner")
+    if executor_provider:
+        executor_config = _provider_override_config(executor_provider, "executor")
 
     if planner_model:
         planner_config = ModelConfig(

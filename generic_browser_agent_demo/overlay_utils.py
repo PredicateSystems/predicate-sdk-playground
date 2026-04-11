@@ -600,6 +600,7 @@ async def dismiss_overlays_before_agent(
     runtime,
     browser,
     *,
+    use_api: bool | None = None,
     verbose: bool = False,
 ) -> OverlayDismissResult:
     """
@@ -611,6 +612,7 @@ async def dismiss_overlays_before_agent(
     Args:
         runtime: AgentRuntime instance
         browser: AsyncPredicateBrowser instance
+        use_api: Force API-based snapshots during overlay handling
         verbose: Print debug info
 
     Returns:
@@ -634,7 +636,7 @@ async def dismiss_overlays_before_agent(
         max_rounds=3,  # More rounds to handle multiple overlays
         snapshot_limit=100,
         max_clicks_per_round=4,  # More clicks per round
-        use_api=True,  # Prefer gateway API for accurate modal detection
+        use_api=use_api,
         max_seconds=12.0,  # More time for complex sites
         verbose=verbose,
     )

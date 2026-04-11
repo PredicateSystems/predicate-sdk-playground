@@ -96,9 +96,12 @@ from overlay_utils import dismiss_overlays_before_agent
 from predicate import AsyncPredicateBrowser
 from predicate.agent_runtime import AgentRuntime
 from predicate.agents import (
+    AutomationTask,
     PlannerExecutorAgent,
     PlannerExecutorConfig,
     SnapshotEscalationConfig,
+    SuccessCriteria,
+    TaskCategory as SdkTaskCategory,
 )
 from predicate.agents.planner_executor_agent import RetryConfig
 from predicate.agents.browser_agent import VisionFallbackConfig
@@ -112,6 +115,28 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def format_compact_token_summary(token_stats: dict[str, Any]) -> str:
+    """Return a compact per-role token summary string."""
+    by_role = token_stats.get("by_role", {}) if isinstance(token_stats, dict) else {}
+    ordered_roles = ("planner", "extract", "executor", "replan", "vision")
+    parts: list[str] = []
+
+    for role in ordered_roles:
+        role_stats = by_role.get(role) or {}
+        total_tokens = int(role_stats.get("total_tokens", 0) or 0)
+        if total_tokens > 0:
+            parts.append(f"{role}={total_tokens}")
+
+    for role, role_stats in by_role.items():
+        if role in ordered_roles:
+            continue
+        total_tokens = int((role_stats or {}).get("total_tokens", 0) or 0)
+        if total_tokens > 0:
+            parts.append(f"{role}={total_tokens}")
+
+    return ", ".join(parts)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -254,6 +279,30 @@ EXAMPLES:
         action="store_true",
         help="Print plan and executor prompts to stdout",
     )
+    agent_group.add_argument(
+        "--verbose-pruning",
+        action="store_true",
+        help="Print pruning details (raw count, pruned count, relaxation level)",
+    )
+    agent_group.add_argument(
+        "--force-category",
+        type=str,
+        choices=["shopping", "form_filling", "search", "extraction", "navigation", "auth", "checkout", "verification", "generic"],
+        default=None,
+        help="Force a specific pruning category (overrides auto-detection)",
+    )
+    agent_group.add_argument(
+        "--use-page-context",
+        action="store_true",
+        default=False,
+        help="Extract page markdown for better planning (adds token cost)",
+    )
+    agent_group.add_argument(
+        "--page-context-max-chars",
+        type=int,
+        default=8000,
+        help="Max characters of page markdown to include (default: 8000)",
+    )
 
     # ==========================================================================
     # Output options
@@ -328,6 +377,52 @@ def get_task_definition(args: argparse.Namespace) -> TaskDefinition:
     sys.exit(1)
 
 
+def _map_demo_category_to_sdk(category: TaskCategory) -> SdkTaskCategory:
+    """Map demo/WebBench categories to SDK automation categories."""
+    mapping = {
+        TaskCategory.READ: SdkTaskCategory.EXTRACTION,
+        TaskCategory.CREATE: SdkTaskCategory.FORM_FILL,
+        TaskCategory.UPDATE: SdkTaskCategory.FORM_FILL,
+        TaskCategory.DELETE: SdkTaskCategory.TRANSACTION,
+        TaskCategory.TRANSACTION: SdkTaskCategory.TRANSACTION,
+    }
+    return mapping[category]
+
+
+def build_automation_task(
+    task_def: TaskDefinition,
+    *,
+    max_steps: int,
+    force_pruning_category: str | None = None,
+) -> AutomationTask:
+    """Build an SDK AutomationTask from the demo task definition."""
+    task_with_context = (
+        f"{task_def.task}\n\n"
+        f"IMPORTANT: The browser is ALREADY at {task_def.starting_url}. "
+        f"Do NOT include a NAVIGATE step to this URL. Start directly with the first action "
+        f"(e.g., TYPE_AND_SUBMIT for search, CLICK for buttons)."
+    )
+    success_criteria = None
+    if task_def.success_predicates:
+        success_criteria = SuccessCriteria(
+            predicates=task_def.success_predicates,
+            require_all=True,
+        )
+
+    return AutomationTask(
+        task_id=task_def.task_id,
+        starting_url=task_def.starting_url,
+        task=task_with_context,
+        category=_map_demo_category_to_sdk(task_def.category),
+        success_criteria=success_criteria,
+        domain_hints=task_def.domain_hints,
+        enable_recovery=task_def.enable_recovery,
+        max_recovery_attempts=2,
+        max_steps=max_steps,
+        force_pruning_category=force_pruning_category,
+    )
+
+
 async def run_agent(
     task_def: TaskDefinition,
     args: argparse.Namespace,
@@ -355,6 +450,8 @@ async def run_agent(
         mode=args.provider,
         planner_model=args.planner_model,
         executor_model=args.executor_model,
+        planner_provider=args.planner_provider,
+        executor_provider=args.executor_provider,
     )
 
     # Create agent configuration
@@ -394,8 +491,11 @@ async def run_agent(
         pre_step_verification=True,
         # Tracing
         trace_screenshots=True,
-        # Verbose mode
-        verbose=args.verbose,
+        # Verbose mode (includes pruning details if --verbose-pruning is set)
+        verbose=args.verbose or getattr(args, 'verbose_pruning', False),
+        # Page context for planning (extracts markdown from page for better plans)
+        use_page_context=getattr(args, 'use_page_context', False),
+        page_context_max_chars=getattr(args, 'page_context_max_chars', 8000),
     )
 
     # Create tracer
@@ -426,6 +526,7 @@ async def run_agent(
     logger.info(f"Headless: {headless}")
     logger.info(f"Provider: {args.provider}")
     logger.info(f"Predicate API: {'enabled' if use_api else 'disabled'}")
+    logger.info(f"Page context: {'enabled' if getattr(args, 'use_page_context', False) else 'disabled'}")
     logger.info("=" * 60)
 
     # Permission policy for common browser prompts
@@ -477,7 +578,10 @@ async def run_agent(
             logger.info("Dismissing initial overlays...")
             try:
                 overlay_result = await dismiss_overlays_before_agent(
-                    runtime, browser, verbose=args.verbose
+                    runtime,
+                    browser,
+                    use_api=True if use_api else None,
+                    verbose=args.verbose,
                 )
                 logger.info(
                     f"Overlay dismissal: {overlay_result.status} "
@@ -490,27 +594,10 @@ async def run_agent(
                 import traceback
                 traceback.print_exc()
 
-            # Build AutomationTask from TaskDefinition
-            from predicate.agents import AutomationTask
-
-            # Modify task to tell planner we're already at the starting URL
-            # This prevents redundant NAVIGATE steps that would trigger page reloads
-            # and cause overlays to reappear after we've dismissed them.
-            task_with_context = (
-                f"{task_def.task}\n\n"
-                f"IMPORTANT: The browser is ALREADY at {task_def.starting_url}. "
-                f"Do NOT include a NAVIGATE step to this URL. Start directly with the first action "
-                f"(e.g., TYPE_AND_SUBMIT for search, CLICK for buttons)."
-            )
-
-            automation_task = AutomationTask(
-                task_id=task_def.task_id,
-                starting_url=task_def.starting_url,
-                task=task_with_context,
-                category=task_def.category.value.upper(),
-                enable_recovery=task_def.enable_recovery,
-                max_recovery_attempts=2,
+            automation_task = build_automation_task(
+                task_def,
                 max_steps=args.max_steps,
+                force_pruning_category=getattr(args, 'force_category', None),
             )
 
             # Run the agent
@@ -530,6 +617,9 @@ async def run_agent(
             logger.info(f"Replans used: {result.replans_used}")
             logger.info(f"Duration: {result.total_duration_ms}ms")
             logger.info(f"Total tokens: {token_stats['total']['total_tokens']}")
+            compact_token_summary = format_compact_token_summary(token_stats)
+            if compact_token_summary:
+                logger.info(f"Token summary: {compact_token_summary}")
 
             if result.error:
                 logger.error(f"Error: {result.error}")
@@ -541,6 +631,8 @@ async def run_agent(
                 logger.info(
                     f"  Step {outcome.step_id}: {outcome.goal[:50]}... - {status}{vision}"
                 )
+                if outcome.extracted_data is not None:
+                    logger.info(f"    Extracted: {json.dumps(outcome.extracted_data, ensure_ascii=False)[:500]}")
 
             return {
                 "success": result.success,
@@ -552,7 +644,13 @@ async def run_agent(
                 "duration_ms": result.total_duration_ms,
                 "error": result.error,
                 "token_usage": token_stats,
+                "token_summary": compact_token_summary,
                 "final_url": result.step_outcomes[-1].url_after if result.step_outcomes else None,
+                "extracted_data": [
+                    outcome.extracted_data
+                    for outcome in result.step_outcomes
+                    if outcome.extracted_data is not None
+                ],
             }
 
         except Exception as e:
@@ -613,6 +711,8 @@ def main():
             print(f"Steps: {result['steps_completed']}/{result['steps_total']}")
         if result.get("duration_ms"):
             print(f"Duration: {result['duration_ms']}ms")
+        if result.get("token_summary"):
+            print(f"Token summary: {result['token_summary']}")
         if result.get("error"):
             print(f"Error: {result['error']}")
         if result.get("final_url"):
